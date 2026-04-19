@@ -1,13 +1,10 @@
-use rand::rng;
-use rand_distr::{Distribution, Normal};
+mod engine;
+mod strategy;
 
-#[derive(Debug)]
-struct SystemState {
-    mid_price: f64,
-    inventory: f64,
-    cash: f64,
-    pnl: f64,
-}
+use engine::state::SystemState;
+use rand_distr::{Distribution, Normal};
+use rand::rng;
+use strategy::market_maker::{compute_quotes, StrategyParams};
 
 fn main() {
     let mut rng = rng();
@@ -21,25 +18,26 @@ fn main() {
         pnl: 0.0,
     };
 
-    /* expected behaviour:
-       smaller spread: more fills, more risk
-       larger spread: fewer fills, more stable
-    */
-    let spread = 0.5;
-    /* expected behaviour:
-       high: more control over inventory
-       too high: stop trading
-     */
-    let skew_coeff = 0.05;
+    let params = StrategyParams {
+        /* expected behaviour:
+           smaller spread: more fills, more risk
+           larger spread: fewer fills, more stable
+        */
+        spread: 0.5,
+        /* expected behaviour:
+           high: more control over inventory
+           too high: stop trading
+        */
+        skew_coeff: 0.05,
+    };
+
     for t in 0..10_000 {
         // simulate random price move
         let price_change = normal.sample(&mut rng);
         let new_price = state.mid_price + price_change;
 
         // quoting
-        let skew = state.inventory * skew_coeff;
-        let bid = state.mid_price - spread / 2.0 - skew;
-        let ask = state.mid_price + spread / 2.0 - skew;
+        let (bid, ask) = compute_quotes(&state, &params);
 
         // fills
         if new_price <= bid {
@@ -53,8 +51,6 @@ fn main() {
         }
 
         state.mid_price = new_price;
-
-        // mark-to-market PnL
         state.pnl = state.cash + state.inventory * state.mid_price;
 
         if t % 500 == 0 {
