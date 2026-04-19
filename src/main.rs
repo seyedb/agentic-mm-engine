@@ -1,65 +1,57 @@
 mod engine;
 mod strategy;
+mod api;
 
+use tokio::task;
 use engine::state::SystemState;
-use rand_distr::{Distribution, Normal};
-use rand::rng;
 use strategy::market_maker::{compute_quotes, StrategyParams};
 
-fn main() {
-    let mut rng = rng();
-    // simulate volatility - price noise
-    let normal = Normal::new(0.0, 0.1).unwrap();
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use rand_distr::{Distribution, Normal};
 
-    let mut state = SystemState {
-        mid_price: 100.0,
-        inventory: 0.0,
-        cash: 0.0,
-        pnl: 0.0,
-    };
+#[tokio::main]
+async fn main() {
+    // simulation state
+    task::spawn(async move {
+        let mut state = SystemState {
+            mid_price: 100.0,
+            inventory: 0.0,
+            cash: 0.0,
+            pnl: 0.0,
+        };
 
-    let params = StrategyParams {
-        /* expected behaviour:
-           smaller spread: more fills, more risk
-           larger spread: fewer fills, more stable
-        */
-        spread: 0.5,
-        /* expected behaviour:
-           high: more control over inventory
-           too high: stop trading
-        */
-        skew_coeff: 0.05,
-    };
+        let mut params = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.05,
+        };
 
-    for t in 0..10_000 {
-        // simulate random price move
-        let price_change = normal.sample(&mut rng);
-        let new_price = state.mid_price + price_change;
+        let mut rng = StdRng::seed_from_u64(42);
+        let normal = Normal::new(0.0, 0.1).unwrap();
 
-        // quoting
-        let (bid, ask) = compute_quotes(&state, &params);
+        loop {
+            // simulate market
+            let price_move = normal.sample(&mut rng);
+            state.mid_price += price_move;
 
-        // fills
-        if new_price <= bid {
-            state.inventory += 1.0;
-            state.cash -= bid;
+            let (bid, ask) = compute_quotes(&state, &params);
+
+            if state.mid_price <= bid {
+                state.inventory += 1.0;
+                state.cash -= bid;
+            }
+
+            if state.mid_price >= ask {
+                state.inventory -= 1.0;
+                state.cash += ask;
+            }
+
+            state.pnl = state.cash + state.inventory * state.mid_price;
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
+    });
 
-        if new_price >= ask {
-            state.inventory -= 1.0;
-            state.cash += ask;
-        }
-
-        state.mid_price = new_price;
-        state.pnl = state.cash + state.inventory * state.mid_price;
-
-        if t % 500 == 0 {
-            println!(
-                "t={} price={:.2} inv={:.2} pnl={:.2}",
-                t, state.mid_price, state.inventory, state.pnl
-            );
-        }
-    }
-
-    println!("final State: {:?}", state);
+    println!("simulation running (no API)");
+    tokio::signal::ctrl_c().await.unwrap();
 }
