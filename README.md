@@ -1,5 +1,6 @@
 ## Agentic Market Making
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 A Rust-based market-making engine simulating inventory-aware quoting with a future extension toward agent-driven strategy control.
 
 ### Overview
