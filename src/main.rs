@@ -3,16 +3,26 @@ mod strategy;
 mod api;
 
 use tokio::task;
-use engine::state::SystemState;
-use strategy::market_maker::{compute_quotes, StrategyParams};
+use tokio::sync::mpsc;
+use axum::{Router, routing::{get, post}};
+use std::net::SocketAddr;
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use rand_distr::{Distribution, Normal};
 
+use api::messages::{Command, Query};
+use api::handlers::{AppState, get_state, update_params};
+use engine::state::SystemState;
+use strategy::market_maker::{compute_quotes, StrategyParams};
+
 #[tokio::main]
 async fn main() {
-    // simulation state
+    // channels
+    let (cmd_tx, mut cmd_rx) = mpsc::channel(100);
+    let (query_tx, mut query_rx) = mpsc::channel(100);
+
+    // spawn simulation loop
     task::spawn(async move {
         let mut state = SystemState {
             mid_price: 100.0,
@@ -30,6 +40,16 @@ async fn main() {
         let normal = Normal::new(0.0, 0.1).unwrap();
 
         loop {
+            // handle commands
+            if let Ok(cmd) = cmd_rx.try_recv() {
+                match cmd {
+                    Command::UpdateParams(p) => {
+                        println!("updated params: {:?}", p);
+                        params = p;
+                    }
+                }
+            }
+
             // simulate market
             let price_move = normal.sample(&mut rng);
             state.mid_price += price_move;
@@ -48,10 +68,37 @@ async fn main() {
 
             state.pnl = state.cash + state.inventory * state.mid_price;
 
+            // handle queries
+            while let Ok(query) = query_rx.try_recv() {
+                match query {
+                    Query::GetState(resp_tx) => {
+                        let _ = resp_tx.send(state.clone());
+                    }
+                }
+            }
+
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     });
 
-    println!("simulation running (no API)");
-    tokio::signal::ctrl_c().await.unwrap();
+    // build api state
+    let app_state = AppState{
+        cmd_tx,
+        query_tx,
+    };
+
+    // build router
+    let app = Router::new()
+        .route("/state", get(get_state))
+        .route("/action", post(update_params))
+        .with_state(app_state);
+
+    // start server
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    println!("api running at http://{}", addr);
+
+    axum::serve(tokio::net::TcpListener::bind(addr).await.unwrap(), app)
+        .await
+        .unwrap();
+
 }
