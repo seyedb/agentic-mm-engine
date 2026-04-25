@@ -14,10 +14,24 @@ use rand_distr::{Distribution, Normal};
 use api::messages::{Command, Query};
 use api::handlers::{AppState, get_state, update_params};
 use engine::state::SystemState;
+// use engine::backtest::run_backtest;
 use strategy::market_maker::{compute_quotes, StrategyParams};
 
 #[tokio::main]
 async fn main() {
+    // let result = run_backtest(
+    //     10_000,
+    //     100.0,
+    //     StrategyParams {
+    //         spread: 0.5,
+    //         skew_coeff: 0.05,
+    //     },
+    // );
+    //
+    // println!("backtest pnl: {}", result.final_pnl);
+    // println!("backtest inventory: {}", result.final_inventory);
+    // println!("backtest final price: {}", result.final_mid_price);
+
     // channels
     let (cmd_tx, mut cmd_rx) = mpsc::channel(100);
     let (query_tx, mut query_rx) = mpsc::channel(100);
