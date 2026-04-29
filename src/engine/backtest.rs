@@ -6,10 +6,9 @@ use rand::SeedableRng;
 use rand_distr::{Distribution, Normal};
 
 pub struct BacktestResult {
-    pub final_pnl: f64,
-    pub final_inventory: f64,
-    pub final_mid_price: f64,
-    pub num_steps: usize,
+    pub pnl_path: Vec<f64>,
+    pub inventory_path: Vec<f64>,
+    pub mid_price_path: Vec<f64>,
 }
 
 pub fn run_backtest(
@@ -27,9 +26,14 @@ pub fn run_backtest(
     let mut rng = StdRng::seed_from_u64(42);
     let normal = Normal::new(0.0, 0.1).unwrap();
 
+    let mut pnl_path = Vec::new();
+    let mut inventory_path = Vec::new();
+    let mut mid_price_path = Vec::new();
+
     for _ in 0..steps {
         let price_move = normal.sample(&mut rng);
         state.mid_price += price_move;
+        // let market_price = state.mid_price + normal.sample(&mut rng);
 
         let (bid, ask) = compute_quotes(&state, &params);
 
@@ -43,14 +47,28 @@ pub fn run_backtest(
             state.cash += ask;
         }
 
+        // if market_price <= bid {
+        //     state.inventory += 1.0;
+        //     state.cash -= bid;
+        // }
+        //
+        // if market_price >= ask {
+        //     state.inventory -= 1.0;
+        //     state.cash += ask;
+        // }
+
+
         state.pnl = state.cash + state.inventory * state.mid_price;
+
+        pnl_path.push(state.pnl);
+        inventory_path.push(state.inventory);
+        mid_price_path.push(state.mid_price);
     }
 
     BacktestResult {
-        final_pnl: state.pnl,
-        final_inventory: state.inventory,
-        final_mid_price: state.mid_price,
-        num_steps: steps,
+        pnl_path,
+        inventory_path,
+        mid_price_path,
     }
 }
 
@@ -67,10 +85,23 @@ mod tests {
 
         let result = run_backtest(1000, 100.0, params);
 
-        assert_eq!(result.num_steps, 1000);
-        assert!(result.final_mid_price > 0.0);
-        // use remaining fields
-        assert!(result.final_pnl.is_finite());
-        assert!(result.final_inventory.is_finite());
+        assert_eq!(result.pnl_path.len(), 1000);
+        assert_eq!(result.inventory_path.len(), 1000);
+        assert_eq!(result.mid_price_path.len(), 1000);
+    }
+
+    #[test]
+    fn test_backtest_price_moves() {
+        let params = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.05,
+        };
+
+        let result = run_backtest(1000, 100.0, params);
+
+        let first_price = result.mid_price_path.first().unwrap();
+        let last_price = result.mid_price_path.last().unwrap();
+
+        assert_ne!(first_price, last_price);
     }
 }
