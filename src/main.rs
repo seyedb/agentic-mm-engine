@@ -14,23 +14,22 @@ use rand_distr::{Distribution, Normal};
 use api::messages::{Command, Query};
 use api::handlers::{AppState, get_state, update_params};
 use engine::state::SystemState;
-// use engine::backtest::run_backtest;
+use engine::backtest::run_backtest;
 use strategy::market_maker::{compute_quotes, StrategyParams};
 
 #[tokio::main]
 async fn main() {
-    // let result = run_backtest(
-    //     10_000,
-    //     100.0,
-    //     StrategyParams {
-    //         spread: 0.5,
-    //         skew_coeff: 0.05,
-    //     },
-    // );
-    //
-    // println!("backtest pnl: {}", result.final_pnl);
-    // println!("backtest inventory: {}", result.final_inventory);
-    // println!("backtest final price: {}", result.final_mid_price);
+    let result = run_backtest(
+        10_000,
+        100.0,
+        StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.05,
+        },
+    );
+
+    println!("final pnl: {:?}", result.pnl_path.last());
+    println!("final inventory: {:?}", result.inventory_path.last());
 
     // channels
     let (cmd_tx, mut cmd_rx) = mpsc::channel(100);
@@ -67,6 +66,7 @@ async fn main() {
             // simulate market
             let price_move = normal.sample(&mut rng);
             state.mid_price += price_move;
+            // let market_price = state.mid_price + normal.sample(&mut rng);
 
             let (bid, ask) = compute_quotes(&state, &params);
 
@@ -79,6 +79,16 @@ async fn main() {
                 state.inventory -= 1.0;
                 state.cash += ask;
             }
+
+            // if market_price <= bid {
+            //     state.inventory += 1.0;
+            //     state.cash -= bid;
+            // }
+            //
+            // if market_price >= ask {
+            //     state.inventory -= 1.0;
+            //     state.cash += ask;
+            // }
 
             state.pnl = state.cash + state.inventory * state.mid_price;
 
