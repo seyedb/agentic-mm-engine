@@ -1,17 +1,27 @@
 use crate::engine::state::SystemState;
-use serde::{Serialize, Deserialize};
+use crate::market::Quote;
+use crate::strategy::QuoteStrategy;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StrategyParams {
     pub spread: f64,
     pub skew_coeff: f64,
 }
-pub fn compute_quotes(state: &SystemState, params: &StrategyParams) -> (f64, f64) {
-    let skew = state.inventory * params.skew_coeff;
-    let bid = state.mid_price - params.spread / 2.0 - skew;
-    let ask = state.mid_price + params.spread / 2.0 - skew;
 
-    (bid, ask)
+impl QuoteStrategy for StrategyParams {
+    fn quote(&self, state: &SystemState) -> Quote {
+        compute_quote(state, self)
+    }
+}
+
+pub fn compute_quote(state: &SystemState, params: &StrategyParams) -> Quote {
+    let skew = state.inventory * params.skew_coeff;
+
+    Quote {
+        bid: state.mid_price - params.spread / 2.0 - skew,
+        ask: state.mid_price + params.spread / 2.0 - skew,
+    }
 }
 
 #[cfg(test)]
@@ -21,42 +31,34 @@ mod tests {
 
     #[test]
     fn test_quotes_symmetry() {
-        let state = SystemState {
-            mid_price: 100.0,
-            inventory: 0.0,
-            cash: 0.0,
-            pnl: 0.0,
-        };
+        let state = SystemState::new(100.0);
 
         let params = StrategyParams {
             spread: 1.0,
             skew_coeff: 0.0,
         };
 
-        let (bid, ask) = compute_quotes(&state, &params);
+        let quote = compute_quote(&state, &params);
 
-        assert_eq!(bid, 99.5);
-        assert_eq!(ask, 100.5);
+        assert_eq!(quote.bid, 99.5);
+        assert_eq!(quote.ask, 100.5);
+        assert_eq!(quote.spread(), 1.0);
     }
 
     #[test]
     fn test_skew_effect() {
-        let state = SystemState {
-            mid_price: 100.0,
-            inventory: 10.0,
-            cash: 0.0,
-            pnl: 0.0,
-        };
+        let mut state = SystemState::new(100.0);
+        state.inventory = 10.0;
 
         let params = StrategyParams {
             spread: 1.0,
             skew_coeff: 0.1,
         };
 
-        let (bid, ask) = compute_quotes(&state, &params);
+        let quote = compute_quote(&state, &params);
 
         // inventory positive -> quotes shift down
-        assert!(bid < 99.5);
-        assert!(ask < 100.5);
+        assert!(quote.bid < 99.5);
+        assert!(quote.ask < 100.5);
     }
 }
