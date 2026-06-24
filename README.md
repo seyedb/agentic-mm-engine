@@ -16,6 +16,7 @@ src/
   main.rs              # small runnable demo
   lib.rs               # reusable library entry point
   engine/
+    metrics.rs         # simulation summary statistics
     simulation.rs      # deterministic simulation loop
     state.rs           # accounting state and PnL updates
   market/
@@ -32,6 +33,7 @@ src/
 - Inventory skews quotes lower when inventory is positive and higher when inventory is negative.
 - Fills occur when a noisy simulated market price crosses the bid or ask.
 - PnL is marked to market as `cash + inventory * mid_price`.
+- Simulation metrics summarize fills, turnover, inventory exposure, and drawdown.
 
 ### Run
 
