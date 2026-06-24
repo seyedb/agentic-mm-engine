@@ -14,6 +14,7 @@ The long-term goal is an agentic market maker: a system where a controller can o
 ```text
 src/
   main.rs              # small runnable demo
+  experiment.rs        # named experiment configs and reports
   lib.rs               # reusable library entry point
   engine/
     metrics.rs         # simulation summary statistics
@@ -34,6 +35,7 @@ src/
 - Fills occur when a noisy simulated market price crosses the bid or ask.
 - PnL is marked to market as `cash + inventory * mid_price`.
 - Simulation metrics summarize fills, turnover, inventory exposure, and drawdown.
+- Named experiments compare strategy settings under the same simulation conditions.
 
 ### Run
 
