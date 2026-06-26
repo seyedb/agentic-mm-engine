@@ -10,19 +10,20 @@ fn main() {
 
     println!("Top parameter sweep results");
     println!(
-        "{:<4} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
-        "rank", "spread", "skew", "pnl", "fills", "fees", "drawdown", "score"
+        "{:<4} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "rank", "spread", "skew", "pnl", "fills", "fees", "adv", "drawdown", "score"
     );
 
     for (index, result) in results.iter().take(10).enumerate() {
         println!(
-            "{:<4} {:>8.2} {:>8.2} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.2}",
+            "{:<4} {:>8.2} {:>8.2} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
             index + 1,
             result.report.strategy.spread,
             result.report.strategy.skew_coeff,
             result.report.metrics.final_pnl,
             result.report.metrics.total_fills,
             result.report.metrics.total_fees,
+            result.report.metrics.total_adverse_selection,
             result.report.metrics.max_drawdown,
             result.score,
         );

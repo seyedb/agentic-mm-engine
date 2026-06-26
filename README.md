@@ -35,6 +35,7 @@ src/
 - Inventory skews quotes lower when inventory is positive and higher when inventory is negative.
 - Fills occur when a noisy simulated market price crosses the bid or ask.
 - Each fill pays a configurable notional fee.
+- Filled quotes move the mid-price slightly against the market maker to model adverse selection.
 - PnL is marked to market as `cash + inventory * mid_price`.
 - Simulation metrics summarize fills, turnover, inventory exposure, and drawdown.
 - Named experiments compare strategy settings under the same simulation conditions.

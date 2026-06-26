@@ -19,6 +19,7 @@ pub struct SimulationMetrics {
     pub traded_quantity: f64,
     pub traded_notional: f64,
     pub total_fees: f64,
+    pub total_adverse_selection: f64,
 }
 
 impl SimulationMetrics {
@@ -38,6 +39,7 @@ impl SimulationMetrics {
         let mut traded_quantity = 0.0;
         let mut traded_notional = 0.0;
         let mut total_fees = 0.0;
+        let mut total_adverse_selection = 0.0;
 
         for step in &result.steps {
             min_pnl = min_pnl.min(step.pnl);
@@ -48,6 +50,7 @@ impl SimulationMetrics {
             let abs_inventory = step.inventory.abs();
             max_abs_inventory = f64::max(max_abs_inventory, abs_inventory);
             sum_abs_inventory += abs_inventory;
+            total_adverse_selection += step.adverse_selection_move.abs();
 
             for fill in &step.fills {
                 total_fills += 1;
@@ -77,6 +80,7 @@ impl SimulationMetrics {
             traded_quantity,
             traded_notional,
             total_fees,
+            total_adverse_selection,
         })
     }
 }
@@ -111,6 +115,7 @@ mod tests {
         assert!(metrics.traded_quantity >= 0.0);
         assert!(metrics.traded_notional >= 0.0);
         assert!(metrics.total_fees >= 0.0);
+        assert!(metrics.total_adverse_selection >= 0.0);
     }
 
     #[test]

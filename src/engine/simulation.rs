@@ -16,6 +16,7 @@ pub struct SimulationConfig {
     pub fill_price_noise: f64,
     pub order_quantity: f64,
     pub fee_rate: f64,
+    pub adverse_selection_per_fill: f64,
 }
 
 impl Default for SimulationConfig {
@@ -28,6 +29,7 @@ impl Default for SimulationConfig {
             fill_price_noise: 0.1,
             order_quantity: 1.0,
             fee_rate: 0.001,
+            adverse_selection_per_fill: 0.02,
         }
     }
 }
@@ -37,6 +39,7 @@ pub struct SimulationStep {
     pub mid_price: f64,
     pub quote: Quote,
     pub fills: Vec<Fill>,
+    pub adverse_selection_move: f64,
     pub inventory: f64,
     pub cash: f64,
     pub pnl: f64,
@@ -75,12 +78,16 @@ where
             state.apply_fill(*fill);
         }
 
+        let adverse_selection_move =
+            apply_adverse_selection(&mut state, &fills, config.adverse_selection_per_fill);
+
         state.mark_to_market();
 
         steps.push(SimulationStep {
             mid_price: state.mid_price,
             quote,
             fills,
+            adverse_selection_move,
             inventory: state.inventory,
             cash: state.cash,
             pnl: state.pnl,
@@ -104,6 +111,26 @@ fn simulate_fills(quote: Quote, market_price: f64, quantity: f64, fee_rate: f64)
     }
 
     fills
+}
+
+fn apply_adverse_selection(
+    state: &mut SystemState,
+    fills: &[Fill],
+    adverse_selection_per_fill: f64,
+) -> f64 {
+    let mut price_move = 0.0;
+
+    for fill in fills {
+        let signed_move = match fill.side {
+            crate::market::FillSide::Buy => -adverse_selection_per_fill * fill.quantity,
+            crate::market::FillSide::Sell => adverse_selection_per_fill * fill.quantity,
+        };
+
+        price_move += signed_move;
+    }
+
+    state.mid_price += price_move;
+    price_move
 }
 
 #[cfg(test)]
@@ -148,5 +175,20 @@ mod tests {
         let last_price = result.steps.last().unwrap().mid_price;
 
         assert_ne!(first_price, last_price);
+    }
+
+    #[test]
+    fn adverse_selection_moves_price_against_fills() {
+        let mut state = SystemState::new(100.0);
+
+        let buy_move = apply_adverse_selection(&mut state, &[Fill::buy(100.0, 1.0, 0.0)], 0.02);
+
+        assert!((buy_move + 0.02).abs() < 1e-9);
+        assert!((state.mid_price - 99.98).abs() < 1e-9);
+
+        let sell_move = apply_adverse_selection(&mut state, &[Fill::sell(100.0, 2.0, 0.0)], 0.02);
+
+        assert!((sell_move - 0.04).abs() < 1e-9);
+        assert!((state.mid_price - 100.02).abs() < 1e-9);
     }
 }
