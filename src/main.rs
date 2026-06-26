@@ -1,52 +1,30 @@
 use mm_engine::engine::simulation::SimulationConfig;
-use mm_engine::experiment::{Experiment, run_experiments};
-use mm_engine::strategy::market_maker::StrategyParams;
+use mm_engine::sweep::{SweepConfig, run_parameter_sweep};
 
 fn main() {
-    let config = SimulationConfig::default();
-    let experiments = vec![
-        Experiment::new(
-            "baseline",
-            config,
-            StrategyParams {
-                spread: 0.5,
-                skew_coeff: 0.05,
-            },
-        ),
-        Experiment::new(
-            "wider_spread",
-            config,
-            StrategyParams {
-                spread: 0.8,
-                skew_coeff: 0.05,
-            },
-        ),
-        Experiment::new(
-            "higher_skew",
-            config,
-            StrategyParams {
-                spread: 0.5,
-                skew_coeff: 0.1,
-            },
-        ),
-    ];
+    let results = run_parameter_sweep(SweepConfig {
+        simulation: SimulationConfig::default(),
+        spreads: vec![0.3, 0.5, 0.8, 1.0],
+        skew_coeffs: vec![0.02, 0.05, 0.1, 0.2],
+    });
 
-    let reports = run_experiments(&experiments);
-
+    println!("Top parameter sweep results");
     println!(
-        "{:<16} {:>8} {:>8} {:>8} {:>8} {:>8}",
-        "experiment", "pnl", "fills", "max_inv", "avg_inv", "drawdown"
+        "{:<4} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "rank", "spread", "skew", "pnl", "fills", "max_inv", "drawdown", "score"
     );
 
-    for report in reports {
+    for (index, result) in results.iter().take(10).enumerate() {
         println!(
-            "{:<16} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.2}",
-            report.name,
-            report.metrics.final_pnl,
-            report.metrics.total_fills,
-            report.metrics.max_abs_inventory,
-            report.metrics.avg_abs_inventory,
-            report.metrics.max_drawdown
+            "{:<4} {:>8.2} {:>8.2} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.2}",
+            index + 1,
+            result.report.strategy.spread,
+            result.report.strategy.skew_coeff,
+            result.report.metrics.final_pnl,
+            result.report.metrics.total_fills,
+            result.report.metrics.max_abs_inventory,
+            result.report.metrics.max_drawdown,
+            result.score,
         );
     }
 }

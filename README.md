@@ -16,6 +16,7 @@ src/
   main.rs              # small runnable demo
   experiment.rs        # named experiment configs and reports
   lib.rs               # reusable library entry point
+  sweep.rs             # grid search over strategy parameters
   engine/
     metrics.rs         # simulation summary statistics
     simulation.rs      # deterministic simulation loop
@@ -36,6 +37,7 @@ src/
 - PnL is marked to market as `cash + inventory * mid_price`.
 - Simulation metrics summarize fills, turnover, inventory exposure, and drawdown.
 - Named experiments compare strategy settings under the same simulation conditions.
+- Parameter sweeps rank spread/skew combinations with a simple risk-adjusted score.
 
 ### Run
 
@@ -49,10 +51,19 @@ cargo run
 cargo test
 ```
 
+### Sweep Score
+
+Parameter sweeps currently use a simple placeholder objective:
+
+```text
+score = final_pnl - 2.0 * max_drawdown - max_abs_inventory
+```
+
+This rewards PnL while penalizing drawdown and inventory exposure. It is intentionally simple and will evolve as the simulator becomes more realistic.
+
 ### Roadmap
 
 - Add explicit experiment configuration.
 - Improve the fill model with arrival probabilities and volatility-aware behavior.
-- Track richer performance metrics such as drawdown, fill count, turnover, and inventory risk.
-- Add parameter sweeps for comparing strategies.
+- Add CSV or JSON output for experiment results.
 - Add an agent/control layer after the core simulator is stable.
