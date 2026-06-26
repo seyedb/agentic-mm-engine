@@ -15,6 +15,7 @@ pub struct SimulationConfig {
     pub price_volatility: f64,
     pub fill_price_noise: f64,
     pub order_quantity: f64,
+    pub fee_rate: f64,
 }
 
 impl Default for SimulationConfig {
@@ -26,6 +27,7 @@ impl Default for SimulationConfig {
             price_volatility: 0.1,
             fill_price_noise: 0.1,
             order_quantity: 1.0,
+            fee_rate: 0.001,
         }
     }
 }
@@ -67,7 +69,7 @@ where
 
         let quote = strategy.quote(&state);
         let market_price = state.mid_price + fill_noise.sample(&mut rng);
-        let fills = simulate_fills(quote, market_price, config.order_quantity);
+        let fills = simulate_fills(quote, market_price, config.order_quantity, config.fee_rate);
 
         for fill in &fills {
             state.apply_fill(*fill);
@@ -88,15 +90,17 @@ where
     SimulationResult { steps }
 }
 
-fn simulate_fills(quote: Quote, market_price: f64, quantity: f64) -> Vec<Fill> {
+fn simulate_fills(quote: Quote, market_price: f64, quantity: f64, fee_rate: f64) -> Vec<Fill> {
     let mut fills = Vec::with_capacity(2);
 
     if market_price <= quote.bid {
-        fills.push(Fill::buy(quote.bid, quantity));
+        let fee = quote.bid * quantity * fee_rate;
+        fills.push(Fill::buy(quote.bid, quantity, fee));
     }
 
     if market_price >= quote.ask {
-        fills.push(Fill::sell(quote.ask, quantity));
+        let fee = quote.ask * quantity * fee_rate;
+        fills.push(Fill::sell(quote.ask, quantity, fee));
     }
 
     fills

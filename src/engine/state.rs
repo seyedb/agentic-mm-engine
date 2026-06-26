@@ -24,11 +24,11 @@ impl SystemState {
         match fill.side {
             FillSide::Buy => {
                 self.inventory += fill.quantity;
-                self.cash -= fill.price * fill.quantity;
+                self.cash -= fill.notional() + fill.fee;
             }
             FillSide::Sell => {
                 self.inventory -= fill.quantity;
-                self.cash += fill.price * fill.quantity;
+                self.cash += fill.notional() - fill.fee;
             }
         }
 
@@ -48,9 +48,21 @@ mod tests {
     fn test_trade_pnl_update() {
         let mut state = SystemState::new(100.0);
 
-        state.apply_fill(Fill::buy(100.0, 1.0));
+        state.apply_fill(Fill::buy(100.0, 1.0, 0.0));
 
         assert_eq!(state.inventory, 1.0);
         assert_eq!(state.cash, -100.0);
+    }
+
+    #[test]
+    fn test_trade_fee_reduces_cash_on_both_sides() {
+        let mut state = SystemState::new(100.0);
+
+        state.apply_fill(Fill::buy(100.0, 1.0, 0.10));
+        state.apply_fill(Fill::sell(101.0, 1.0, 0.10));
+
+        assert_eq!(state.inventory, 0.0);
+        assert!((state.cash - 0.80).abs() < 1e-9);
+        assert!((state.pnl - 0.80).abs() < 1e-9);
     }
 }

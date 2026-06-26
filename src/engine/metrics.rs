@@ -18,6 +18,7 @@ pub struct SimulationMetrics {
     pub sell_fills: usize,
     pub traded_quantity: f64,
     pub traded_notional: f64,
+    pub total_fees: f64,
 }
 
 impl SimulationMetrics {
@@ -36,6 +37,7 @@ impl SimulationMetrics {
         let mut sell_fills = 0;
         let mut traded_quantity = 0.0;
         let mut traded_notional = 0.0;
+        let mut total_fees = 0.0;
 
         for step in &result.steps {
             min_pnl = min_pnl.min(step.pnl);
@@ -50,7 +52,8 @@ impl SimulationMetrics {
             for fill in &step.fills {
                 total_fills += 1;
                 traded_quantity += fill.quantity;
-                traded_notional += fill.price * fill.quantity;
+                traded_notional += fill.notional();
+                total_fees += fill.fee;
 
                 match fill.side {
                     FillSide::Buy => buy_fills += 1,
@@ -73,6 +76,7 @@ impl SimulationMetrics {
             sell_fills,
             traded_quantity,
             traded_notional,
+            total_fees,
         })
     }
 }
@@ -106,6 +110,7 @@ mod tests {
         assert!(metrics.max_drawdown >= 0.0);
         assert!(metrics.traded_quantity >= 0.0);
         assert!(metrics.traded_notional >= 0.0);
+        assert!(metrics.total_fees >= 0.0);
     }
 
     #[test]

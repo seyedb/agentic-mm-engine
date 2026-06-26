@@ -23,22 +23,29 @@ pub struct Fill {
     pub side: FillSide,
     pub price: f64,
     pub quantity: f64,
+    pub fee: f64,
 }
 
 impl Fill {
-    pub fn buy(price: f64, quantity: f64) -> Self {
+    pub fn buy(price: f64, quantity: f64, fee: f64) -> Self {
         Self {
             side: FillSide::Buy,
             price,
             quantity,
+            fee,
         }
     }
 
-    pub fn sell(price: f64, quantity: f64) -> Self {
+    pub fn sell(price: f64, quantity: f64, fee: f64) -> Self {
         Self {
             side: FillSide::Sell,
             price,
             quantity,
+            fee,
         }
+    }
+
+    pub fn notional(&self) -> f64 {
+        self.price * self.quantity
     }
 }
