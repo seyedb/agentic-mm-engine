@@ -53,6 +53,7 @@ By default this loads `configs/baseline_sweep.json`. A different sweep config ca
 
 ```bash
 cargo run -- configs/baseline_sweep.json
+cargo run -- configs/high_volatility_sweep.json
 ```
 
 ### Test
