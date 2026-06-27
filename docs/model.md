@@ -11,7 +11,7 @@ This project is an experimental simulator, not a production trading system.
 
 ## Strategy
 
-The current strategy is an inventory-skewed market maker:
+The current baseline strategy is an inventory-skewed market maker:
 
 - A fixed spread sets the base distance between bid and ask.
 - Positive inventory shifts both quotes lower.
@@ -20,6 +20,12 @@ The current strategy is an inventory-skewed market maker:
 This makes the strategy less eager to buy when inventory is high and more eager to buy when inventory is low.
 
 Strategies receive a context object that includes estimated volatility. The current inventory-skew strategy does not use it yet, but this prepares the engine for volatility-aware quoting.
+
+The project also includes a volatility-aware strategy. It widens the effective spread as estimated volatility rises:
+
+```text
+effective_spread = base_spread + volatility_coeff * estimated_volatility
+```
 
 ## Fills
 

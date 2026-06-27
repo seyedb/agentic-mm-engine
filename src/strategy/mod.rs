@@ -1,4 +1,5 @@
 pub mod market_maker;
+pub mod volatility_aware;
 
 use crate::engine::state::SystemState;
 use crate::market::Quote;
