@@ -65,11 +65,11 @@ fn print_top_results(config_path: &Path, results: &[SweepResult]) {
         "runs",
         "spread",
         "skew",
-        "pnl",
-        "fills",
-        "fees",
-        "adv",
-        "drawdown",
+        "avg_pnl",
+        "avg_fill",
+        "avg_fee",
+        "avg_adv",
+        "avg_dd",
         "idle",
         "score"
     );
