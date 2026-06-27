@@ -3,80 +3,44 @@
 
 A Rust-based experimental market-making engine for studying inventory-aware quoting and, eventually, agent-driven strategy control.
 
-### Overview
+### Status
 
-This project is a learning and research environment for market-making ideas. It is intentionally not a production trading system. The current engine simulates a mid-price process, generates bid/ask quotes from an inventory-aware strategy, simulates fills, and tracks cash, inventory, and mark-to-market PnL.
+This is a learning and research project, not a production trading system. The current focus is a clean simulation core with configurable parameter sweeps and reproducible experiment output.
 
-The long-term goal is an agentic market maker: a system where a controller can observe simulation state and adapt strategy parameters over time. The current focus is building a clean, testable simulation core before adding agent or API layers.
+The long-term goal is an agentic market maker: a system where a controller can observe market state, evaluate risk, and adapt strategy parameters over time.
 
-### Architecture
+### What It Does
 
-```text
-src/
-  main.rs              # small runnable demo
-  configs/             # JSON experiment configuration
-  experiment.rs        # named experiment configs and reports
-  lib.rs               # reusable library entry point
-  sweep.rs             # grid search over strategy parameters
-  engine/
-    metrics.rs         # simulation summary statistics
-    simulation.rs      # deterministic simulation loop
-    state.rs           # accounting state and PnL updates
-  market/
-    mod.rs             # quotes, fills, and market-side types
-  strategy/
-    market_maker.rs    # inventory-skew market-making strategy
-    mod.rs             # strategy trait
-```
-
-### Current Model
-
-- Price follows a seeded random walk.
-- The strategy quotes around mid-price with a fixed spread.
-- Inventory skews quotes lower when inventory is positive and higher when inventory is negative.
-- Fills occur when a noisy simulated market price crosses the bid or ask.
-- Each fill pays a configurable notional fee.
-- Filled quotes move the mid-price slightly against the market maker to model adverse selection.
-- PnL is marked to market as `cash + inventory * mid_price`.
-- Simulation metrics summarize fills, turnover, inventory exposure, and drawdown.
-- Named experiments compare strategy settings under the same simulation conditions.
-- Parameter sweeps rank spread/skew combinations with a simple risk-adjusted score.
-- Sweep runs write CSV results to `target/reports/sweep_results.csv`.
+- Simulates a market-making strategy with inventory-aware quote skew.
+- Models fills, fees, adverse selection, inventory, cash, and mark-to-market PnL.
+- Runs configurable spread/skew parameter sweeps.
+- Writes ranked sweep results to CSV.
 
 ### Run
 
 ```bash
 cargo run
-```
-
-By default this loads `configs/baseline_sweep.json`. A different sweep config can be passed as the first argument:
-
-```bash
 cargo run -- configs/baseline_sweep.json
 cargo run -- configs/high_volatility_sweep.json
 ```
 
-### Test
+The default config is `configs/baseline_sweep.json`.
+
+### Verify
 
 ```bash
 cargo test
+cargo clippy -- -D warnings
 ```
 
-### Sweep Score
+### Docs
 
-Parameter sweeps currently use a simple placeholder objective:
-
-```text
-score = final_pnl
-      - 2.0 * max_drawdown
-      - max_abs_inventory
-      - inactivity_penalty
-```
-
-This rewards PnL while penalizing drawdown, inventory exposure, and strategies that do not trade enough to be useful.
+- [Model assumptions](docs/model.md)
+- [Experiments and sweeps](docs/experiments.md)
 
 ### Roadmap
 
-- Add explicit experiment configuration.
 - Improve the fill model with arrival probabilities and volatility-aware behavior.
+- Add multi-regime comparison reports.
+- Add live public market data in paper-trading mode.
 - Add an agent/control layer after the core simulator is stable.
