@@ -59,10 +59,13 @@ cargo test
 Parameter sweeps currently use a simple placeholder objective:
 
 ```text
-score = final_pnl - 2.0 * max_drawdown - max_abs_inventory
+score = final_pnl
+      - 2.0 * max_drawdown
+      - max_abs_inventory
+      - inactivity_penalty
 ```
 
-This rewards PnL while penalizing drawdown and inventory exposure. It is intentionally simple and will evolve as the simulator becomes more realistic.
+This rewards PnL while penalizing drawdown, inventory exposure, and strategies that do not trade enough to be useful.
 
 ### Roadmap
 
