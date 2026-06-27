@@ -8,6 +8,7 @@ Experiments are configured with JSON files in `configs/`.
 cargo run
 cargo run -- configs/baseline_sweep.json
 cargo run -- configs/high_volatility_sweep.json
+cargo run -- configs/baseline_sweep.json configs/high_volatility_sweep.json
 ```
 
 The default config is `configs/baseline_sweep.json`.
@@ -25,10 +26,16 @@ The runner evaluates every spread/skew combination and ranks the results.
 
 ## Output
 
-The terminal prints the top sweep results. The full ranked sweep is written to:
+The terminal prints the top sweep results for each config. Full ranked sweeps are written to:
 
 ```text
-target/reports/sweep_results.csv
+target/reports/<config_name>.csv
+```
+
+The best result from each config is also written to:
+
+```text
+target/reports/regime_summary.csv
 ```
 
 ## Score

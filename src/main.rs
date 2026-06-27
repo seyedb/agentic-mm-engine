@@ -1,4 +1,4 @@
-use mm_engine::sweep::{SweepConfig, run_parameter_sweep, sweep_results_to_csv};
+use mm_engine::sweep::{SweepConfig, SweepResult, run_parameter_sweep, sweep_results_to_csv};
 use std::env;
 use std::error::Error;
 use std::fs;
@@ -7,14 +7,56 @@ use std::path::{Path, PathBuf};
 const DEFAULT_CONFIG_PATH: &str = "configs/baseline_sweep.json";
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let config_path = env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_PATH));
+    let output_dir = Path::new("target").join("reports");
+    fs::create_dir_all(&output_dir).expect("failed to create report output directory");
 
-    let config = load_sweep_config(&config_path)?;
-    let results = run_parameter_sweep(config);
+    let config_paths = config_paths_from_args();
+    let mut summaries = Vec::new();
 
+    for config_path in config_paths {
+        let config = load_sweep_config(&config_path)?;
+        let results = run_parameter_sweep(config);
+        let regime = regime_name(&config_path);
+
+        print_top_results(&config_path, &results);
+
+        let csv_path = output_dir.join(format!("{regime}.csv"));
+        fs::write(&csv_path, sweep_results_to_csv(&results)).expect("failed to write sweep CSV");
+
+        if let Some(best_result) = results.first() {
+            summaries.push(RegimeSummary::from_best_result(regime, best_result));
+        }
+
+        println!("\nwrote {}", csv_path.display());
+    }
+
+    let summary_path = output_dir.join("regime_summary.csv");
+    fs::write(&summary_path, regime_summaries_to_csv(&summaries))
+        .expect("failed to write regime summary CSV");
+
+    println!("wrote {}", summary_path.display());
+
+    Ok(())
+}
+
+fn config_paths_from_args() -> Vec<PathBuf> {
+    let paths: Vec<PathBuf> = env::args().skip(1).map(PathBuf::from).collect();
+
+    if paths.is_empty() {
+        vec![PathBuf::from(DEFAULT_CONFIG_PATH)]
+    } else {
+        paths
+    }
+}
+
+fn load_sweep_config(path: &Path) -> Result<SweepConfig, Box<dyn Error>> {
+    let contents = fs::read_to_string(path)?;
+    let config = serde_json::from_str(&contents)?;
+
+    Ok(config)
+}
+
+fn print_top_results(config_path: &Path, results: &[SweepResult]) {
     println!("Top parameter sweep results");
     println!("config: {}", config_path.display());
     println!(
@@ -37,21 +79,60 @@ fn main() -> Result<(), Box<dyn Error>> {
             result.score,
         );
     }
-
-    let output_dir = Path::new("target").join("reports");
-    fs::create_dir_all(&output_dir).expect("failed to create report output directory");
-
-    let csv_path = output_dir.join("sweep_results.csv");
-    fs::write(&csv_path, sweep_results_to_csv(&results)).expect("failed to write sweep CSV");
-
-    println!("\nwrote {}", csv_path.display());
-
-    Ok(())
 }
 
-fn load_sweep_config(path: &Path) -> Result<SweepConfig, Box<dyn Error>> {
-    let contents = fs::read_to_string(path)?;
-    let config = serde_json::from_str(&contents)?;
+fn regime_name(config_path: &Path) -> String {
+    config_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("sweep_results")
+        .to_string()
+}
 
-    Ok(config)
+struct RegimeSummary {
+    regime: String,
+    best_spread: f64,
+    best_skew: f64,
+    best_score: f64,
+    best_pnl: f64,
+    fills: usize,
+    max_drawdown: f64,
+    max_abs_inventory: f64,
+}
+
+impl RegimeSummary {
+    fn from_best_result(regime: String, result: &SweepResult) -> Self {
+        Self {
+            regime,
+            best_spread: result.report.strategy.spread,
+            best_skew: result.report.strategy.skew_coeff,
+            best_score: result.score,
+            best_pnl: result.report.metrics.final_pnl,
+            fills: result.report.metrics.total_fills,
+            max_drawdown: result.report.metrics.max_drawdown,
+            max_abs_inventory: result.report.metrics.max_abs_inventory,
+        }
+    }
+}
+
+fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
+    let mut csv = String::from(
+        "regime,best_spread,best_skew,best_score,best_pnl,fills,max_drawdown,max_abs_inventory\n",
+    );
+
+    for summary in summaries {
+        csv.push_str(&format!(
+            "{},{:.6},{:.6},{:.6},{:.6},{},{:.6},{:.6}\n",
+            summary.regime,
+            summary.best_spread,
+            summary.best_skew,
+            summary.best_score,
+            summary.best_pnl,
+            summary.fills,
+            summary.max_drawdown,
+            summary.max_abs_inventory,
+        ));
+    }
+
+    csv
 }
