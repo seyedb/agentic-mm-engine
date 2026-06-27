@@ -7,7 +7,8 @@
     "fill_price_noise": 0.1,
     "order_quantity": 1.0,
     "fee_rate": 0.001,
-    "adverse_selection_per_fill": 0.02
+    "adverse_selection_per_fill": 0.02,
+    "volatility_window": 50
   },
   "seeds": [38, 39, 40, 41, 42],
   "spreads": [0.3, 0.5, 0.8, 1.0],

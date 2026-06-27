@@ -7,6 +7,7 @@ This project is an experimental simulator, not a production trading system.
 - The mid-price follows a seeded random walk.
 - Quotes are generated around the current mid-price.
 - A noisy market price is sampled around the mid-price to determine fills.
+- The simulator tracks a rolling estimate of recent mid-price volatility.
 
 ## Strategy
 
@@ -17,6 +18,8 @@ The current strategy is an inventory-skewed market maker:
 - Negative inventory shifts both quotes higher.
 
 This makes the strategy less eager to buy when inventory is high and more eager to buy when inventory is low.
+
+Strategies receive a context object that includes estimated volatility. The current inventory-skew strategy does not use it yet, but this prepares the engine for volatility-aware quoting.
 
 ## Fills
 

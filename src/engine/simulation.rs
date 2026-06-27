@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::state::SystemState;
 use crate::market::{Fill, Quote};
-use crate::strategy::QuoteStrategy;
+use crate::strategy::{QuoteStrategy, StrategyContext};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SimulationConfig {
@@ -17,6 +17,7 @@ pub struct SimulationConfig {
     pub order_quantity: f64,
     pub fee_rate: f64,
     pub adverse_selection_per_fill: f64,
+    pub volatility_window: usize,
 }
 
 impl Default for SimulationConfig {
@@ -30,6 +31,7 @@ impl Default for SimulationConfig {
             order_quantity: 1.0,
             fee_rate: 0.001,
             adverse_selection_per_fill: 0.02,
+            volatility_window: 50,
         }
     }
 }
@@ -37,6 +39,7 @@ impl Default for SimulationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationStep {
     pub mid_price: f64,
+    pub estimated_volatility: f64,
     pub quote: Quote,
     pub fills: Vec<Fill>,
     pub adverse_selection_move: f64,
@@ -64,13 +67,19 @@ where
     let mut rng = StdRng::seed_from_u64(config.seed);
     let price_move = Normal::new(0.0, config.price_volatility).unwrap();
     let fill_noise = Normal::new(0.0, config.fill_price_noise).unwrap();
+    let mut volatility_estimator = RollingVolatility::new(config.volatility_window);
 
     let mut steps = Vec::with_capacity(config.steps);
 
     for _ in 0..config.steps {
+        let previous_mid_price = state.mid_price;
         state.mid_price += price_move.sample(&mut rng);
+        volatility_estimator.push(state.mid_price - previous_mid_price);
+        let context = StrategyContext {
+            estimated_volatility: volatility_estimator.estimate(),
+        };
 
-        let quote = strategy.quote(&state);
+        let quote = strategy.quote(&state, &context);
         let market_price = state.mid_price + fill_noise.sample(&mut rng);
         let fills = simulate_fills(quote, market_price, config.order_quantity, config.fee_rate);
 
@@ -85,6 +94,7 @@ where
 
         steps.push(SimulationStep {
             mid_price: state.mid_price,
+            estimated_volatility: context.estimated_volatility,
             quote,
             fills,
             adverse_selection_move,
@@ -95,6 +105,51 @@ where
     }
 
     SimulationResult { steps }
+}
+
+struct RollingVolatility {
+    window: usize,
+    returns: Vec<f64>,
+}
+
+impl RollingVolatility {
+    fn new(window: usize) -> Self {
+        Self {
+            window,
+            returns: Vec::with_capacity(window.max(1)),
+        }
+    }
+
+    fn push(&mut self, value: f64) {
+        if self.window == 0 {
+            return;
+        }
+
+        if self.returns.len() == self.window {
+            self.returns.remove(0);
+        }
+
+        self.returns.push(value);
+    }
+
+    fn estimate(&self) -> f64 {
+        if self.returns.is_empty() {
+            return 0.0;
+        }
+
+        let mean = self.returns.iter().sum::<f64>() / self.returns.len() as f64;
+        let variance = self
+            .returns
+            .iter()
+            .map(|value| {
+                let diff = value - mean;
+                diff * diff
+            })
+            .sum::<f64>()
+            / self.returns.len() as f64;
+
+        variance.sqrt()
+    }
 }
 
 fn simulate_fills(quote: Quote, market_price: f64, quantity: f64, fee_rate: f64) -> Vec<Fill> {
@@ -190,5 +245,43 @@ mod tests {
 
         assert!((sell_move - 0.04).abs() < 1e-9);
         assert!((state.mid_price - 100.02).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rolling_volatility_estimates_recent_price_moves() {
+        let mut estimator = RollingVolatility::new(3);
+
+        estimator.push(1.0);
+        estimator.push(-1.0);
+        estimator.push(1.0);
+
+        assert!(estimator.estimate() > 0.0);
+
+        estimator.push(0.0);
+
+        assert_eq!(estimator.returns.len(), 3);
+    }
+
+    #[test]
+    fn simulation_records_estimated_volatility() {
+        let strategy = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.05,
+        };
+
+        let result = run_simulation(
+            SimulationConfig {
+                steps: 100,
+                ..SimulationConfig::default()
+            },
+            &strategy,
+        );
+
+        assert!(
+            result
+                .steps
+                .iter()
+                .any(|step| step.estimated_volatility > 0.0)
+        );
     }
 }

@@ -1,6 +1,6 @@
 use crate::engine::state::SystemState;
 use crate::market::Quote;
-use crate::strategy::QuoteStrategy;
+use crate::strategy::{QuoteStrategy, StrategyContext};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -10,7 +10,7 @@ pub struct StrategyParams {
 }
 
 impl QuoteStrategy for StrategyParams {
-    fn quote(&self, state: &SystemState) -> Quote {
+    fn quote(&self, state: &SystemState, _context: &StrategyContext) -> Quote {
         compute_quote(state, self)
     }
 }
