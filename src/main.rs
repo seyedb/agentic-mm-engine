@@ -60,10 +60,11 @@ fn print_top_results(config_path: &Path, results: &[SweepResult]) {
     println!("Top parameter sweep results");
     println!("config: {}", config_path.display());
     println!(
-        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
         "rank",
         "runs",
         "spread",
+        "vol",
         "skew",
         "avg_pnl",
         "avg_fill",
@@ -76,11 +77,12 @@ fn print_top_results(config_path: &Path, results: &[SweepResult]) {
 
     for (index, result) in results.iter().take(10).enumerate() {
         println!(
-            "{:<4} {:>5} {:>8.2} {:>8.2} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+            "{:<4} {:>5} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
             index + 1,
             result.runs,
-            result.strategy.spread,
-            result.strategy.skew_coeff,
+            result.strategy.primary_spread(),
+            optional_f64(result.strategy.volatility_coeff()),
+            result.strategy.skew_coeff(),
             result.metrics.final_pnl,
             result.metrics.total_fills,
             result.metrics.total_fees,
@@ -90,6 +92,12 @@ fn print_top_results(config_path: &Path, results: &[SweepResult]) {
             result.score,
         );
     }
+}
+
+fn optional_f64(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.2}"))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn regime_name(config_path: &Path) -> String {
@@ -116,8 +124,8 @@ impl RegimeSummary {
     fn from_best_result(regime: String, result: &SweepResult) -> Self {
         Self {
             regime,
-            best_spread: result.strategy.spread,
-            best_skew: result.strategy.skew_coeff,
+            best_spread: result.strategy.primary_spread(),
+            best_skew: result.strategy.skew_coeff(),
             runs: result.runs,
             best_score: result.score,
             best_pnl: result.metrics.final_pnl,

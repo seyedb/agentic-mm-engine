@@ -8,6 +8,7 @@ Experiments are configured with JSON files in `configs/`.
 cargo run
 cargo run -- configs/baseline_sweep.json
 cargo run -- configs/high_volatility_sweep.json
+cargo run -- configs/volatility_aware_sweep.json
 cargo run -- configs/baseline_sweep.json configs/high_volatility_sweep.json
 ```
 
@@ -19,8 +20,7 @@ A sweep config contains:
 
 - simulation settings
 - optional seed values for multi-seed aggregation
-- spread values
-- skew coefficient values
+- strategy sweep settings
 - scoring settings
 
 The runner evaluates every spread/skew combination across the configured seeds, averages the metrics, and ranks the aggregate results.
@@ -56,3 +56,4 @@ The inactivity penalty discourages strategies that avoid trading entirely.
 
 - `baseline_sweep.json`: lower-volatility baseline environment
 - `high_volatility_sweep.json`: higher volatility, noisier fills, stronger adverse selection
+- `volatility_aware_sweep.json`: high-volatility environment using volatility-aware quoting

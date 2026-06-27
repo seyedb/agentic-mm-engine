@@ -2,28 +2,29 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::metrics::SimulationMetrics;
 use crate::engine::simulation::{SimulationConfig, run_simulation};
-use crate::strategy::market_maker::StrategyParams;
+use crate::strategy::QuoteStrategy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Experiment {
+pub struct Experiment<S> {
     pub name: String,
     pub simulation: SimulationConfig,
-    pub strategy: StrategyParams,
+    pub strategy: S,
 }
 
-impl Experiment {
-    pub fn new(
-        name: impl Into<String>,
-        simulation: SimulationConfig,
-        strategy: StrategyParams,
-    ) -> Self {
+impl<S> Experiment<S> {
+    pub fn new(name: impl Into<String>, simulation: SimulationConfig, strategy: S) -> Self {
         Self {
             name: name.into(),
             simulation,
             strategy,
         }
     }
+}
 
+impl<S> Experiment<S>
+where
+    S: Clone + QuoteStrategy,
+{
     pub fn run(&self) -> Option<ExperimentReport> {
         let result = run_simulation(self.simulation, &self.strategy);
         let metrics = SimulationMetrics::from_result(&result)?;
@@ -31,7 +32,6 @@ impl Experiment {
         Some(ExperimentReport {
             name: self.name.clone(),
             simulation: self.simulation,
-            strategy: self.strategy.clone(),
             metrics,
         })
     }
@@ -41,17 +41,20 @@ impl Experiment {
 pub struct ExperimentReport {
     pub name: String,
     pub simulation: SimulationConfig,
-    pub strategy: StrategyParams,
     pub metrics: SimulationMetrics,
 }
 
-pub fn run_experiments(experiments: &[Experiment]) -> Vec<ExperimentReport> {
+pub fn run_experiments<S>(experiments: &[Experiment<S>]) -> Vec<ExperimentReport>
+where
+    S: Clone + QuoteStrategy,
+{
     experiments.iter().filter_map(Experiment::run).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::strategy::market_maker::StrategyParams;
 
     #[test]
     fn experiment_runs_and_returns_report() {
@@ -71,7 +74,6 @@ mod tests {
 
         assert_eq!(report.name, "baseline");
         assert_eq!(report.metrics.steps, 100);
-        assert_eq!(report.strategy.spread, 0.5);
     }
 
     #[test]

@@ -23,6 +23,7 @@ The long-term goal is an agentic market maker: a system where a controller can o
 cargo run
 cargo run -- configs/baseline_sweep.json
 cargo run -- configs/high_volatility_sweep.json
+cargo run -- configs/volatility_aware_sweep.json
 cargo run -- configs/baseline_sweep.json configs/high_volatility_sweep.json
 ```
 

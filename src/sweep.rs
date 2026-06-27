@@ -4,26 +4,89 @@ use std::fmt::Write;
 
 use crate::engine::simulation::SimulationConfig;
 use crate::experiment::{Experiment, ExperimentReport};
+use crate::strategy::QuoteStrategy;
 use crate::strategy::market_maker::StrategyParams;
+use crate::strategy::volatility_aware::VolatilityAwareParams;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SweepConfig {
     pub simulation: SimulationConfig,
     #[serde(default)]
     pub seeds: Vec<u64>,
-    pub spreads: Vec<f64>,
-    pub skew_coeffs: Vec<f64>,
+    pub strategy: StrategySweepConfig,
     pub scoring: ScoringConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum StrategySweepConfig {
+    #[serde(rename = "fixed_spread")]
+    FixedSpread {
+        spreads: Vec<f64>,
+        skew_coeffs: Vec<f64>,
+    },
+    #[serde(rename = "volatility_aware")]
+    VolatilityAware {
+        base_spreads: Vec<f64>,
+        volatility_coeffs: Vec<f64>,
+        skew_coeffs: Vec<f64>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SweepResult {
     pub name: String,
-    pub strategy: StrategyParams,
+    pub strategy: SweepStrategyParams,
     pub runs: usize,
     pub metrics: SweepMetrics,
     pub inactivity_penalty: f64,
     pub score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SweepStrategyParams {
+    FixedSpread {
+        spread: f64,
+        skew_coeff: f64,
+    },
+    VolatilityAware {
+        base_spread: f64,
+        volatility_coeff: f64,
+        skew_coeff: f64,
+    },
+}
+
+impl SweepStrategyParams {
+    pub fn primary_spread(&self) -> f64 {
+        match self {
+            Self::FixedSpread { spread, .. } => *spread,
+            Self::VolatilityAware { base_spread, .. } => *base_spread,
+        }
+    }
+
+    pub fn skew_coeff(&self) -> f64 {
+        match self {
+            Self::FixedSpread { skew_coeff, .. } | Self::VolatilityAware { skew_coeff, .. } => {
+                *skew_coeff
+            }
+        }
+    }
+
+    pub fn volatility_coeff(&self) -> Option<f64> {
+        match self {
+            Self::FixedSpread { .. } => None,
+            Self::VolatilityAware {
+                volatility_coeff, ..
+            } => Some(*volatility_coeff),
+        }
+    }
+
+    pub fn strategy_type(&self) -> &'static str {
+        match self {
+            Self::FixedSpread { .. } => "fixed_spread",
+            Self::VolatilityAware { .. } => "volatility_aware",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -66,23 +129,27 @@ impl Default for ScoringConfig {
 pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
     let scoring = config.scoring;
     let seeds = sweep_seeds(&config);
-    let mut results = Vec::with_capacity(config.spreads.len() * config.skew_coeffs.len());
+    let mut results = match &config.strategy {
+        StrategySweepConfig::FixedSpread {
+            spreads,
+            skew_coeffs,
+        } => run_fixed_spread_sweep(&config.simulation, &seeds, spreads, skew_coeffs),
+        StrategySweepConfig::VolatilityAware {
+            base_spreads,
+            volatility_coeffs,
+            skew_coeffs,
+        } => run_volatility_aware_sweep(
+            &config.simulation,
+            &seeds,
+            base_spreads,
+            volatility_coeffs,
+            skew_coeffs,
+        ),
+    };
 
-    for spread in &config.spreads {
-        for skew_coeff in &config.skew_coeffs {
-            let strategy = StrategyParams {
-                spread: *spread,
-                skew_coeff: *skew_coeff,
-            };
-            let name = format!("spread_{spread:.2}_skew_{skew_coeff:.2}");
-            let reports = run_seeded_reports(&config.simulation, &seeds, &name, &strategy);
-
-            if let Some(mut result) = aggregate_reports(name, strategy, &reports) {
-                result.inactivity_penalty = inactivity_penalty(&result, scoring);
-                result.score = score_result(&result, scoring);
-                results.push(result);
-            }
-        }
+    for result in &mut results {
+        result.inactivity_penalty = inactivity_penalty(result, scoring);
+        result.score = score_result(result, scoring);
     }
 
     results.sort_by(|a, b| b.score.total_cmp(&a.score));
@@ -91,7 +158,7 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
 
 pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
     let mut csv = String::from(
-        "rank,experiment,spread,skew,runs,score,inactivity_penalty,avg_final_pnl,avg_min_pnl,\
+        "rank,experiment,strategy_type,spread,volatility_coeff,skew,runs,score,inactivity_penalty,avg_final_pnl,avg_min_pnl,\
          avg_max_pnl,avg_max_drawdown,avg_final_inventory,avg_max_abs_inventory,\
          avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,\
          avg_traded_notional,avg_total_fees,avg_total_adverse_selection\n",
@@ -102,11 +169,13 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
 
         writeln!(
             csv,
-            "{},{},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
+            "{},{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
             index + 1,
             result.name,
-            result.strategy.spread,
-            result.strategy.skew_coeff,
+            result.strategy.strategy_type(),
+            result.strategy.primary_spread(),
+            optional_f64(result.strategy.volatility_coeff()),
+            result.strategy.skew_coeff(),
             result.runs,
             result.score,
             result.inactivity_penalty,
@@ -131,6 +200,10 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
     csv
 }
 
+fn optional_f64(value: Option<f64>) -> String {
+    value.map(|value| format!("{value:.6}")).unwrap_or_default()
+}
+
 fn sweep_seeds(config: &SweepConfig) -> Vec<u64> {
     if config.seeds.is_empty() {
         vec![config.simulation.seed]
@@ -143,7 +216,7 @@ fn run_seeded_reports(
     simulation: &SimulationConfig,
     seeds: &[u64],
     name: &str,
-    strategy: &StrategyParams,
+    strategy: &(impl Clone + QuoteStrategy),
 ) -> Vec<ExperimentReport> {
     seeds
         .iter()
@@ -158,7 +231,7 @@ fn run_seeded_reports(
 
 fn aggregate_reports(
     name: String,
-    strategy: StrategyParams,
+    strategy: SweepStrategyParams,
     reports: &[ExperimentReport],
 ) -> Option<SweepResult> {
     let runs = reports.len();
@@ -227,6 +300,73 @@ fn aggregate_reports(
     })
 }
 
+fn run_fixed_spread_sweep(
+    simulation: &SimulationConfig,
+    seeds: &[u64],
+    spreads: &[f64],
+    skew_coeffs: &[f64],
+) -> Vec<SweepResult> {
+    let mut results = Vec::with_capacity(spreads.len() * skew_coeffs.len());
+
+    for spread in spreads {
+        for skew_coeff in skew_coeffs {
+            let strategy = StrategyParams {
+                spread: *spread,
+                skew_coeff: *skew_coeff,
+            };
+            let name = format!("spread_{spread:.2}_skew_{skew_coeff:.2}");
+            let reports = run_seeded_reports(simulation, seeds, &name, &strategy);
+            let sweep_strategy = SweepStrategyParams::FixedSpread {
+                spread: *spread,
+                skew_coeff: *skew_coeff,
+            };
+
+            if let Some(result) = aggregate_reports(name, sweep_strategy, &reports) {
+                results.push(result);
+            }
+        }
+    }
+
+    results
+}
+
+fn run_volatility_aware_sweep(
+    simulation: &SimulationConfig,
+    seeds: &[u64],
+    base_spreads: &[f64],
+    volatility_coeffs: &[f64],
+    skew_coeffs: &[f64],
+) -> Vec<SweepResult> {
+    let mut results =
+        Vec::with_capacity(base_spreads.len() * volatility_coeffs.len() * skew_coeffs.len());
+
+    for base_spread in base_spreads {
+        for volatility_coeff in volatility_coeffs {
+            for skew_coeff in skew_coeffs {
+                let strategy = VolatilityAwareParams {
+                    base_spread: *base_spread,
+                    volatility_coeff: *volatility_coeff,
+                    skew_coeff: *skew_coeff,
+                };
+                let name =
+                    format!("base_{base_spread:.2}_vol_{volatility_coeff:.2}_skew_{skew_coeff:.2}");
+                let reports = run_seeded_reports(simulation, seeds, &name, &strategy);
+                let sweep_strategy = SweepStrategyParams::VolatilityAware {
+                    base_spread: *base_spread,
+                    volatility_coeff: *volatility_coeff,
+                    skew_coeff: *skew_coeff,
+                };
+
+                if let Some(result) = aggregate_reports(name, sweep_strategy, &reports) {
+                    results.push(result);
+                }
+            }
+        }
+    }
+
+    results
+}
+
 fn score_result(result: &SweepResult, scoring: ScoringConfig) -> f64 {
     result.metrics.final_pnl
         - scoring.drawdown_weight * result.metrics.max_drawdown
@@ -252,8 +392,10 @@ mod tests {
                 ..SimulationConfig::default()
             },
             seeds: vec![1, 2],
-            spreads: vec![0.3, 0.5],
-            skew_coeffs: vec![0.05, 0.1, 0.2],
+            strategy: StrategySweepConfig::FixedSpread {
+                spreads: vec![0.3, 0.5],
+                skew_coeffs: vec![0.05, 0.1, 0.2],
+            },
             scoring: ScoringConfig::default(),
         });
 
@@ -268,8 +410,10 @@ mod tests {
                 ..SimulationConfig::default()
             },
             seeds: vec![1, 2],
-            spreads: vec![0.3, 0.5],
-            skew_coeffs: vec![0.05, 0.1],
+            strategy: StrategySweepConfig::FixedSpread {
+                spreads: vec![0.3, 0.5],
+                skew_coeffs: vec![0.05, 0.1],
+            },
             scoring: ScoringConfig::default(),
         });
 
@@ -288,14 +432,16 @@ mod tests {
                 ..SimulationConfig::default()
             },
             seeds: vec![42],
-            spreads: vec![0.3],
-            skew_coeffs: vec![0.05],
+            strategy: StrategySweepConfig::FixedSpread {
+                spreads: vec![0.3],
+                skew_coeffs: vec![0.05],
+            },
             scoring: ScoringConfig::default(),
         });
 
         let csv = sweep_results_to_csv(&results);
 
-        assert!(csv.starts_with("rank,experiment,spread,skew,runs,score"));
+        assert!(csv.starts_with("rank,experiment,strategy_type,spread"));
         assert!(csv.contains("spread_0.30_skew_0.05"));
         assert_eq!(csv.lines().count(), 2);
     }
@@ -308,8 +454,10 @@ mod tests {
                 ..SimulationConfig::default()
             },
             seeds: vec![42],
-            spreads: vec![1.0],
-            skew_coeffs: vec![0.05],
+            strategy: StrategySweepConfig::FixedSpread {
+                spreads: vec![1.0],
+                skew_coeffs: vec![0.05],
+            },
             scoring: ScoringConfig {
                 min_fills: 50,
                 missing_fill_penalty: 0.25,
@@ -331,13 +479,39 @@ mod tests {
                 ..SimulationConfig::default()
             },
             seeds: vec![1, 2, 3],
-            spreads: vec![0.3],
-            skew_coeffs: vec![0.05],
+            strategy: StrategySweepConfig::FixedSpread {
+                spreads: vec![0.3],
+                skew_coeffs: vec![0.05],
+            },
             scoring: ScoringConfig::default(),
         });
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].runs, 3);
         assert!(results[0].metrics.total_fills >= 0.0);
+    }
+
+    #[test]
+    fn volatility_aware_sweep_runs_each_parameter_combination() {
+        let results = run_parameter_sweep(SweepConfig {
+            simulation: SimulationConfig {
+                steps: 100,
+                ..SimulationConfig::default()
+            },
+            seeds: vec![1],
+            strategy: StrategySweepConfig::VolatilityAware {
+                base_spreads: vec![0.3, 0.5],
+                volatility_coeffs: vec![0.0, 2.0],
+                skew_coeffs: vec![0.05],
+            },
+            scoring: ScoringConfig::default(),
+        });
+
+        assert_eq!(results.len(), 4);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.strategy.strategy_type() == "volatility_aware")
+        );
     }
 }
