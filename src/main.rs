@@ -1,5 +1,7 @@
 use mm_engine::engine::simulation::SimulationConfig;
-use mm_engine::sweep::{SweepConfig, run_parameter_sweep};
+use mm_engine::sweep::{SweepConfig, run_parameter_sweep, sweep_results_to_csv};
+use std::fs;
+use std::path::Path;
 
 fn main() {
     let results = run_parameter_sweep(SweepConfig {
@@ -28,4 +30,12 @@ fn main() {
             result.score,
         );
     }
+
+    let output_dir = Path::new("target").join("reports");
+    fs::create_dir_all(&output_dir).expect("failed to create report output directory");
+
+    let csv_path = output_dir.join("sweep_results.csv");
+    fs::write(&csv_path, sweep_results_to_csv(&results)).expect("failed to write sweep CSV");
+
+    println!("\nwrote {}", csv_path.display());
 }

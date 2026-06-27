@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use std::fmt::Write;
+
 use crate::engine::simulation::SimulationConfig;
 use crate::experiment::{Experiment, ExperimentReport, run_experiments};
 use crate::strategy::market_maker::StrategyParams;
@@ -30,6 +32,46 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
 
     results.sort_by(|a, b| b.score.total_cmp(&a.score));
     results
+}
+
+pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
+    let mut csv = String::from(
+        "rank,experiment,spread,skew,score,final_pnl,min_pnl,max_pnl,max_drawdown,\
+         final_inventory,max_abs_inventory,avg_abs_inventory,total_fills,buy_fills,\
+         sell_fills,traded_quantity,traded_notional,total_fees,total_adverse_selection\n",
+    );
+
+    for (index, result) in results.iter().enumerate() {
+        let report = &result.report;
+        let metrics = report.metrics;
+
+        writeln!(
+            csv,
+            "{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{},{},{},{:.6},{:.6},{:.6},{:.6}",
+            index + 1,
+            report.name,
+            report.strategy.spread,
+            report.strategy.skew_coeff,
+            result.score,
+            metrics.final_pnl,
+            metrics.min_pnl,
+            metrics.max_pnl,
+            metrics.max_drawdown,
+            metrics.final_inventory,
+            metrics.max_abs_inventory,
+            metrics.avg_abs_inventory,
+            metrics.total_fills,
+            metrics.buy_fills,
+            metrics.sell_fills,
+            metrics.traded_quantity,
+            metrics.traded_notional,
+            metrics.total_fees,
+            metrics.total_adverse_selection,
+        )
+        .expect("writing to a String should not fail");
+    }
+
+    csv
 }
 
 fn build_sweep_experiments(config: SweepConfig) -> Vec<Experiment> {
@@ -89,5 +131,23 @@ mod tests {
                 .windows(2)
                 .all(|window| window[0].score >= window[1].score)
         );
+    }
+
+    #[test]
+    fn sweep_results_export_to_csv() {
+        let results = run_parameter_sweep(SweepConfig {
+            simulation: SimulationConfig {
+                steps: 100,
+                ..SimulationConfig::default()
+            },
+            spreads: vec![0.3],
+            skew_coeffs: vec![0.05],
+        });
+
+        let csv = sweep_results_to_csv(&results);
+
+        assert!(csv.starts_with("rank,experiment,spread,skew,score"));
+        assert!(csv.contains("spread_0.30_skew_0.05"));
+        assert_eq!(csv.lines().count(), 2);
     }
 }

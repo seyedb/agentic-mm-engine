@@ -40,6 +40,7 @@ src/
 - Simulation metrics summarize fills, turnover, inventory exposure, and drawdown.
 - Named experiments compare strategy settings under the same simulation conditions.
 - Parameter sweeps rank spread/skew combinations with a simple risk-adjusted score.
+- Sweep runs write CSV results to `target/reports/sweep_results.csv`.
 
 ### Run
 
