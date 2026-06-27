@@ -18,11 +18,12 @@ The default config is `configs/baseline_sweep.json`.
 A sweep config contains:
 
 - simulation settings
+- optional seed values for multi-seed aggregation
 - spread values
 - skew coefficient values
 - scoring settings
 
-The runner evaluates every spread/skew combination and ranks the results.
+The runner evaluates every spread/skew combination across the configured seeds, averages the metrics, and ranks the aggregate results.
 
 ## Output
 
