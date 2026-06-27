@@ -1,4 +1,5 @@
 {
+  "name": "high_volatility_volatility_aware",
   "simulation": {
     "steps": 10000,
     "initial_mid_price": 100.0,

@@ -18,6 +18,7 @@ The default config is `configs/baseline_sweep.json`.
 
 A sweep config contains:
 
+- an optional experiment name
 - simulation settings
 - optional seed values for multi-seed aggregation
 - strategy sweep settings
@@ -27,7 +28,7 @@ The runner evaluates every spread/skew combination across the configured seeds, 
 
 ## Output
 
-The terminal prints the top sweep results for each config. Full ranked sweeps are written to:
+The terminal prints the top sweep results for each config. Full ranked sweeps are written using the config `name` when present:
 
 ```text
 target/reports/<config_name>.csv

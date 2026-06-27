@@ -15,10 +15,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for config_path in config_paths {
         let config = load_sweep_config(&config_path)?;
+        let regime = config_name(&config, &config_path);
         let results = run_parameter_sweep(config);
-        let regime = regime_name(&config_path);
 
-        print_top_results(&config_path, &results);
+        print_top_results(&regime, &config_path, &results);
 
         let csv_path = output_dir.join(format!("{regime}.csv"));
         fs::write(&csv_path, sweep_results_to_csv(&results)).expect("failed to write sweep CSV");
@@ -56,8 +56,9 @@ fn load_sweep_config(path: &Path) -> Result<SweepConfig, Box<dyn Error>> {
     Ok(config)
 }
 
-fn print_top_results(config_path: &Path, results: &[SweepResult]) {
+fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) {
     println!("Top parameter sweep results");
+    println!("name: {regime}");
     println!("config: {}", config_path.display());
     println!(
         "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
@@ -100,7 +101,14 @@ fn optional_f64(value: Option<f64>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn regime_name(config_path: &Path) -> String {
+fn config_name(config: &SweepConfig, config_path: &Path) -> String {
+    config
+        .name
+        .clone()
+        .unwrap_or_else(|| file_stem(config_path))
+}
+
+fn file_stem(config_path: &Path) -> String {
     config_path
         .file_stem()
         .and_then(|stem| stem.to_str())

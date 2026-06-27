@@ -10,6 +10,8 @@ use crate::strategy::volatility_aware::VolatilityAwareParams;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SweepConfig {
+    #[serde(default)]
+    pub name: Option<String>,
     pub simulation: SimulationConfig,
     #[serde(default)]
     pub seeds: Vec<u64>,
@@ -387,6 +389,7 @@ mod tests {
     #[test]
     fn sweep_runs_each_parameter_combination() {
         let results = run_parameter_sweep(SweepConfig {
+            name: None,
             simulation: SimulationConfig {
                 steps: 100,
                 ..SimulationConfig::default()
@@ -405,6 +408,7 @@ mod tests {
     #[test]
     fn sweep_results_are_sorted_by_score_descending() {
         let results = run_parameter_sweep(SweepConfig {
+            name: None,
             simulation: SimulationConfig {
                 steps: 100,
                 ..SimulationConfig::default()
@@ -427,6 +431,7 @@ mod tests {
     #[test]
     fn sweep_results_export_to_csv() {
         let results = run_parameter_sweep(SweepConfig {
+            name: None,
             simulation: SimulationConfig {
                 steps: 100,
                 ..SimulationConfig::default()
@@ -449,6 +454,7 @@ mod tests {
     #[test]
     fn inactivity_penalty_applies_to_low_fill_reports() {
         let results = run_parameter_sweep(SweepConfig {
+            name: None,
             simulation: SimulationConfig {
                 steps: 100,
                 ..SimulationConfig::default()
@@ -474,6 +480,7 @@ mod tests {
     #[test]
     fn sweep_aggregates_across_seeds() {
         let results = run_parameter_sweep(SweepConfig {
+            name: None,
             simulation: SimulationConfig {
                 steps: 100,
                 ..SimulationConfig::default()
@@ -494,6 +501,7 @@ mod tests {
     #[test]
     fn volatility_aware_sweep_runs_each_parameter_combination() {
         let results = run_parameter_sweep(SweepConfig {
+            name: None,
             simulation: SimulationConfig {
                 steps: 100,
                 ..SimulationConfig::default()
