@@ -1,17 +1,22 @@
-use mm_engine::engine::simulation::SimulationConfig;
-use mm_engine::sweep::{ScoringConfig, SweepConfig, run_parameter_sweep, sweep_results_to_csv};
+use mm_engine::sweep::{SweepConfig, run_parameter_sweep, sweep_results_to_csv};
+use std::env;
+use std::error::Error;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-fn main() {
-    let results = run_parameter_sweep(SweepConfig {
-        simulation: SimulationConfig::default(),
-        spreads: vec![0.3, 0.5, 0.8, 1.0],
-        skew_coeffs: vec![0.02, 0.05, 0.1, 0.2],
-        scoring: ScoringConfig::default(),
-    });
+const DEFAULT_CONFIG_PATH: &str = "configs/baseline_sweep.json";
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let config_path = env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_PATH));
+
+    let config = load_sweep_config(&config_path)?;
+    let results = run_parameter_sweep(config);
 
     println!("Top parameter sweep results");
+    println!("config: {}", config_path.display());
     println!(
         "{:<4} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
         "rank", "spread", "skew", "pnl", "fills", "fees", "adv", "drawdown", "idle", "score"
@@ -40,4 +45,13 @@ fn main() {
     fs::write(&csv_path, sweep_results_to_csv(&results)).expect("failed to write sweep CSV");
 
     println!("\nwrote {}", csv_path.display());
+
+    Ok(())
+}
+
+fn load_sweep_config(path: &Path) -> Result<SweepConfig, Box<dyn Error>> {
+    let contents = fs::read_to_string(path)?;
+    let config = serde_json::from_str(&contents)?;
+
+    Ok(config)
 }

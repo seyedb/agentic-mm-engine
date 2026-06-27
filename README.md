@@ -14,6 +14,7 @@ The long-term goal is an agentic market maker: a system where a controller can o
 ```text
 src/
   main.rs              # small runnable demo
+  configs/             # JSON experiment configuration
   experiment.rs        # named experiment configs and reports
   lib.rs               # reusable library entry point
   sweep.rs             # grid search over strategy parameters
@@ -48,6 +49,12 @@ src/
 cargo run
 ```
 
+By default this loads `configs/baseline_sweep.json`. A different sweep config can be passed as the first argument:
+
+```bash
+cargo run -- configs/baseline_sweep.json
+```
+
 ### Test
 
 ```bash
@@ -71,5 +78,4 @@ This rewards PnL while penalizing drawdown, inventory exposure, and strategies t
 
 - Add explicit experiment configuration.
 - Improve the fill model with arrival probabilities and volatility-aware behavior.
-- Add CSV or JSON output for experiment results.
 - Add an agent/control layer after the core simulator is stable.
