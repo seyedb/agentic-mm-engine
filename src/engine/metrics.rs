@@ -23,6 +23,18 @@ pub struct SimulationMetrics {
     pub low_vol_steps: usize,
     pub normal_vol_steps: usize,
     pub high_vol_steps: usize,
+    pub low_vol_fills: usize,
+    pub normal_vol_fills: usize,
+    pub high_vol_fills: usize,
+    pub low_vol_fees: f64,
+    pub normal_vol_fees: f64,
+    pub high_vol_fees: f64,
+    pub low_vol_adverse_selection: f64,
+    pub normal_vol_adverse_selection: f64,
+    pub high_vol_adverse_selection: f64,
+    pub low_vol_avg_abs_inventory: f64,
+    pub normal_vol_avg_abs_inventory: f64,
+    pub high_vol_avg_abs_inventory: f64,
 }
 
 impl SimulationMetrics {
@@ -46,6 +58,9 @@ impl SimulationMetrics {
         let mut low_vol_steps = 0;
         let mut normal_vol_steps = 0;
         let mut high_vol_steps = 0;
+        let mut low_vol_execution = RegimeExecutionMetrics::default();
+        let mut normal_vol_execution = RegimeExecutionMetrics::default();
+        let mut high_vol_execution = RegimeExecutionMetrics::default();
 
         for step in &result.steps {
             min_pnl = min_pnl.min(step.pnl);
@@ -56,19 +71,32 @@ impl SimulationMetrics {
             let abs_inventory = step.inventory.abs();
             max_abs_inventory = f64::max(max_abs_inventory, abs_inventory);
             sum_abs_inventory += abs_inventory;
-            total_adverse_selection += step.adverse_selection_move.abs();
+            let adverse_selection = step.adverse_selection_move.abs();
+            total_adverse_selection += adverse_selection;
 
-            match step.regime {
-                MarketRegime::LowVol => low_vol_steps += 1,
-                MarketRegime::NormalVol => normal_vol_steps += 1,
-                MarketRegime::HighVol => high_vol_steps += 1,
-            }
+            let regime_execution = match step.regime {
+                MarketRegime::LowVol => {
+                    low_vol_steps += 1;
+                    &mut low_vol_execution
+                }
+                MarketRegime::NormalVol => {
+                    normal_vol_steps += 1;
+                    &mut normal_vol_execution
+                }
+                MarketRegime::HighVol => {
+                    high_vol_steps += 1;
+                    &mut high_vol_execution
+                }
+            };
+
+            regime_execution.record_step(abs_inventory, adverse_selection);
 
             for fill in &step.fills {
                 total_fills += 1;
                 traded_quantity += fill.quantity;
                 traded_notional += fill.notional();
                 total_fees += fill.fee;
+                regime_execution.record_fill(fill.fee);
 
                 match fill.side {
                     FillSide::Buy => buy_fills += 1,
@@ -96,7 +124,49 @@ impl SimulationMetrics {
             low_vol_steps,
             normal_vol_steps,
             high_vol_steps,
+            low_vol_fills: low_vol_execution.fills,
+            normal_vol_fills: normal_vol_execution.fills,
+            high_vol_fills: high_vol_execution.fills,
+            low_vol_fees: low_vol_execution.fees,
+            normal_vol_fees: normal_vol_execution.fees,
+            high_vol_fees: high_vol_execution.fees,
+            low_vol_adverse_selection: low_vol_execution.adverse_selection,
+            normal_vol_adverse_selection: normal_vol_execution.adverse_selection,
+            high_vol_adverse_selection: high_vol_execution.adverse_selection,
+            low_vol_avg_abs_inventory: low_vol_execution.avg_abs_inventory(),
+            normal_vol_avg_abs_inventory: normal_vol_execution.avg_abs_inventory(),
+            high_vol_avg_abs_inventory: high_vol_execution.avg_abs_inventory(),
         })
+    }
+}
+
+#[derive(Default)]
+struct RegimeExecutionMetrics {
+    steps: usize,
+    fills: usize,
+    fees: f64,
+    adverse_selection: f64,
+    sum_abs_inventory: f64,
+}
+
+impl RegimeExecutionMetrics {
+    fn record_step(&mut self, abs_inventory: f64, adverse_selection: f64) {
+        self.steps += 1;
+        self.sum_abs_inventory += abs_inventory;
+        self.adverse_selection += adverse_selection;
+    }
+
+    fn record_fill(&mut self, fee: f64) {
+        self.fills += 1;
+        self.fees += fee;
+    }
+
+    fn avg_abs_inventory(&self) -> f64 {
+        if self.steps == 0 {
+            0.0
+        } else {
+            self.sum_abs_inventory / self.steps as f64
+        }
     }
 }
 
@@ -134,6 +204,26 @@ mod tests {
         assert_eq!(
             metrics.steps,
             metrics.low_vol_steps + metrics.normal_vol_steps + metrics.high_vol_steps
+        );
+        assert_eq!(
+            metrics.total_fills,
+            metrics.low_vol_fills + metrics.normal_vol_fills + metrics.high_vol_fills
+        );
+        assert!(
+            (metrics.total_fees
+                - metrics.low_vol_fees
+                - metrics.normal_vol_fees
+                - metrics.high_vol_fees)
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (metrics.total_adverse_selection
+                - metrics.low_vol_adverse_selection
+                - metrics.normal_vol_adverse_selection
+                - metrics.high_vol_adverse_selection)
+                .abs()
+                < 1e-9
         );
     }
 

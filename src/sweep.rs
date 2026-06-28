@@ -225,6 +225,18 @@ pub struct SweepMetrics {
     pub low_vol_steps: f64,
     pub normal_vol_steps: f64,
     pub high_vol_steps: f64,
+    pub low_vol_fills: f64,
+    pub normal_vol_fills: f64,
+    pub high_vol_fills: f64,
+    pub low_vol_fees: f64,
+    pub normal_vol_fees: f64,
+    pub high_vol_fees: f64,
+    pub low_vol_adverse_selection: f64,
+    pub normal_vol_adverse_selection: f64,
+    pub high_vol_adverse_selection: f64,
+    pub low_vol_avg_abs_inventory: f64,
+    pub normal_vol_avg_abs_inventory: f64,
+    pub high_vol_avg_abs_inventory: f64,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -319,55 +331,72 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
         "rank,experiment,strategy_type,spread,volatility_coeff,risk_aversion,skew,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
          avg_max_pnl,avg_max_drawdown,avg_final_inventory,avg_max_abs_inventory,\
          max_drawdown_std,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,\
-         avg_traded_notional,avg_total_fees,avg_total_adverse_selection,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps\n",
+         avg_traded_notional,avg_total_fees,avg_total_adverse_selection,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps,\
+         avg_low_vol_fills,avg_normal_vol_fills,avg_high_vol_fills,avg_low_vol_fees,avg_normal_vol_fees,avg_high_vol_fees,\
+         avg_low_vol_adverse_selection,avg_normal_vol_adverse_selection,avg_high_vol_adverse_selection,\
+         avg_low_vol_abs_inventory,avg_normal_vol_abs_inventory,avg_high_vol_abs_inventory\n",
     );
 
     for (index, result) in results.iter().enumerate() {
         let metrics = result.metrics;
-
-        writeln!(
-            csv,
-            "{},{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
-            index + 1,
-            result.name,
-            result.strategy.strategy_type(),
-            result.representative_spread(),
+        let row = vec![
+            (index + 1).to_string(),
+            result.name.clone(),
+            result.strategy.strategy_type().to_string(),
+            format_f64(result.representative_spread()),
             optional_f64(result.representative_volatility_coeff()),
             optional_f64(result.strategy.risk_aversion()),
             optional_f64(result.representative_skew_coeff()),
-            result.runs,
-            result.score,
-            result.stability.score_std,
-            result.stable_score,
-            result.inactivity_penalty,
-            metrics.final_pnl,
-            result.stability.final_pnl_std,
-            metrics.min_pnl,
-            metrics.max_pnl,
-            metrics.max_drawdown,
-            metrics.final_inventory,
-            metrics.max_abs_inventory,
-            result.stability.max_drawdown_std,
-            metrics.avg_abs_inventory,
-            metrics.total_fills,
-            metrics.buy_fills,
-            metrics.sell_fills,
-            metrics.traded_quantity,
-            metrics.traded_notional,
-            metrics.total_fees,
-            metrics.total_adverse_selection,
-            metrics.low_vol_steps,
-            metrics.normal_vol_steps,
-            metrics.high_vol_steps,
-        )
-        .expect("writing to a String should not fail");
+            result.runs.to_string(),
+            format_f64(result.score),
+            format_f64(result.stability.score_std),
+            format_f64(result.stable_score),
+            format_f64(result.inactivity_penalty),
+            format_f64(metrics.final_pnl),
+            format_f64(result.stability.final_pnl_std),
+            format_f64(metrics.min_pnl),
+            format_f64(metrics.max_pnl),
+            format_f64(metrics.max_drawdown),
+            format_f64(metrics.final_inventory),
+            format_f64(metrics.max_abs_inventory),
+            format_f64(result.stability.max_drawdown_std),
+            format_f64(metrics.avg_abs_inventory),
+            format_f64(metrics.total_fills),
+            format_f64(metrics.buy_fills),
+            format_f64(metrics.sell_fills),
+            format_f64(metrics.traded_quantity),
+            format_f64(metrics.traded_notional),
+            format_f64(metrics.total_fees),
+            format_f64(metrics.total_adverse_selection),
+            format_f64(metrics.low_vol_steps),
+            format_f64(metrics.normal_vol_steps),
+            format_f64(metrics.high_vol_steps),
+            format_f64(metrics.low_vol_fills),
+            format_f64(metrics.normal_vol_fills),
+            format_f64(metrics.high_vol_fills),
+            format_f64(metrics.low_vol_fees),
+            format_f64(metrics.normal_vol_fees),
+            format_f64(metrics.high_vol_fees),
+            format_f64(metrics.low_vol_adverse_selection),
+            format_f64(metrics.normal_vol_adverse_selection),
+            format_f64(metrics.high_vol_adverse_selection),
+            format_f64(metrics.low_vol_avg_abs_inventory),
+            format_f64(metrics.normal_vol_avg_abs_inventory),
+            format_f64(metrics.high_vol_avg_abs_inventory),
+        ];
+
+        writeln!(csv, "{}", row.join(",")).expect("writing to a String should not fail");
     }
 
     csv
 }
 
+fn format_f64(value: f64) -> String {
+    format!("{value:.6}")
+}
+
 fn optional_f64(value: Option<f64>) -> String {
-    value.map(|value| format!("{value:.6}")).unwrap_or_default()
+    value.map(format_f64).unwrap_or_default()
 }
 
 fn sweep_seeds(config: &SweepConfig) -> Vec<u64> {
@@ -424,6 +453,18 @@ fn aggregate_reports(
         low_vol_steps: 0.0,
         normal_vol_steps: 0.0,
         high_vol_steps: 0.0,
+        low_vol_fills: 0.0,
+        normal_vol_fills: 0.0,
+        high_vol_fills: 0.0,
+        low_vol_fees: 0.0,
+        normal_vol_fees: 0.0,
+        high_vol_fees: 0.0,
+        low_vol_adverse_selection: 0.0,
+        normal_vol_adverse_selection: 0.0,
+        high_vol_adverse_selection: 0.0,
+        low_vol_avg_abs_inventory: 0.0,
+        normal_vol_avg_abs_inventory: 0.0,
+        high_vol_avg_abs_inventory: 0.0,
     };
 
     for report in reports {
@@ -444,6 +485,18 @@ fn aggregate_reports(
         metrics.low_vol_steps += report.metrics.low_vol_steps as f64;
         metrics.normal_vol_steps += report.metrics.normal_vol_steps as f64;
         metrics.high_vol_steps += report.metrics.high_vol_steps as f64;
+        metrics.low_vol_fills += report.metrics.low_vol_fills as f64;
+        metrics.normal_vol_fills += report.metrics.normal_vol_fills as f64;
+        metrics.high_vol_fills += report.metrics.high_vol_fills as f64;
+        metrics.low_vol_fees += report.metrics.low_vol_fees;
+        metrics.normal_vol_fees += report.metrics.normal_vol_fees;
+        metrics.high_vol_fees += report.metrics.high_vol_fees;
+        metrics.low_vol_adverse_selection += report.metrics.low_vol_adverse_selection;
+        metrics.normal_vol_adverse_selection += report.metrics.normal_vol_adverse_selection;
+        metrics.high_vol_adverse_selection += report.metrics.high_vol_adverse_selection;
+        metrics.low_vol_avg_abs_inventory += report.metrics.low_vol_avg_abs_inventory;
+        metrics.normal_vol_avg_abs_inventory += report.metrics.normal_vol_avg_abs_inventory;
+        metrics.high_vol_avg_abs_inventory += report.metrics.high_vol_avg_abs_inventory;
     }
 
     let runs_f64 = runs as f64;
@@ -464,6 +517,18 @@ fn aggregate_reports(
     metrics.low_vol_steps /= runs_f64;
     metrics.normal_vol_steps /= runs_f64;
     metrics.high_vol_steps /= runs_f64;
+    metrics.low_vol_fills /= runs_f64;
+    metrics.normal_vol_fills /= runs_f64;
+    metrics.high_vol_fills /= runs_f64;
+    metrics.low_vol_fees /= runs_f64;
+    metrics.normal_vol_fees /= runs_f64;
+    metrics.high_vol_fees /= runs_f64;
+    metrics.low_vol_adverse_selection /= runs_f64;
+    metrics.normal_vol_adverse_selection /= runs_f64;
+    metrics.high_vol_adverse_selection /= runs_f64;
+    metrics.low_vol_avg_abs_inventory /= runs_f64;
+    metrics.normal_vol_avg_abs_inventory /= runs_f64;
+    metrics.high_vol_avg_abs_inventory /= runs_f64;
 
     Some(SweepResult {
         name,
@@ -760,6 +825,11 @@ mod tests {
         assert!(csv.contains("avg_low_vol_steps"));
         assert!(csv.contains("avg_normal_vol_steps"));
         assert!(csv.contains("avg_high_vol_steps"));
+        assert!(csv.contains("avg_low_vol_fills"));
+        assert!(csv.contains("avg_normal_vol_fills"));
+        assert!(csv.contains("avg_high_vol_fills"));
+        assert!(csv.contains("avg_low_vol_adverse_selection"));
+        assert!(csv.contains("avg_normal_vol_abs_inventory"));
         assert!(csv.contains("spread_0.30_skew_0.05"));
         assert_eq!(csv.lines().count(), 2);
     }

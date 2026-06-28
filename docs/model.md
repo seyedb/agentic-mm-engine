@@ -33,6 +33,8 @@ A volatility schedule can force the market process through multiple regimes:
 
 The last schedule point whose `start_step` is less than or equal to the current step controls the price volatility.
 
+Regime-level execution attribution includes fills, fees, adverse selection, and average absolute inventory. PnL is intentionally not split by regime because inventory can be accumulated in one regime and marked in another.
+
 ## Strategy
 
 The current baseline strategy is an inventory-skewed market maker:

@@ -144,6 +144,18 @@ struct RegimeSummary {
     low_vol_steps: f64,
     normal_vol_steps: f64,
     high_vol_steps: f64,
+    low_vol_fills: f64,
+    normal_vol_fills: f64,
+    high_vol_fills: f64,
+    low_vol_fees: f64,
+    normal_vol_fees: f64,
+    high_vol_fees: f64,
+    low_vol_adverse_selection: f64,
+    normal_vol_adverse_selection: f64,
+    high_vol_adverse_selection: f64,
+    low_vol_avg_abs_inventory: f64,
+    normal_vol_avg_abs_inventory: f64,
+    high_vol_avg_abs_inventory: f64,
 }
 
 impl RegimeSummary {
@@ -168,18 +180,30 @@ impl RegimeSummary {
             low_vol_steps: result.metrics.low_vol_steps,
             normal_vol_steps: result.metrics.normal_vol_steps,
             high_vol_steps: result.metrics.high_vol_steps,
+            low_vol_fills: result.metrics.low_vol_fills,
+            normal_vol_fills: result.metrics.normal_vol_fills,
+            high_vol_fills: result.metrics.high_vol_fills,
+            low_vol_fees: result.metrics.low_vol_fees,
+            normal_vol_fees: result.metrics.normal_vol_fees,
+            high_vol_fees: result.metrics.high_vol_fees,
+            low_vol_adverse_selection: result.metrics.low_vol_adverse_selection,
+            normal_vol_adverse_selection: result.metrics.normal_vol_adverse_selection,
+            high_vol_adverse_selection: result.metrics.high_vol_adverse_selection,
+            low_vol_avg_abs_inventory: result.metrics.low_vol_avg_abs_inventory,
+            normal_vol_avg_abs_inventory: result.metrics.normal_vol_avg_abs_inventory,
+            high_vol_avg_abs_inventory: result.metrics.high_vol_avg_abs_inventory,
         }
     }
 }
 
 fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
     let mut csv = String::from(
-        "regime,strategy_type,best_spread,best_volatility_coeff,best_risk_aversion,best_skew,runs,best_score,best_score_std,best_stable_score,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps\n",
+        "regime,strategy_type,best_spread,best_volatility_coeff,best_risk_aversion,best_skew,runs,best_score,best_score_std,best_stable_score,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps,avg_low_vol_fills,avg_normal_vol_fills,avg_high_vol_fills,avg_low_vol_fees,avg_normal_vol_fees,avg_high_vol_fees,avg_low_vol_adverse_selection,avg_normal_vol_adverse_selection,avg_high_vol_adverse_selection,avg_low_vol_abs_inventory,avg_normal_vol_abs_inventory,avg_high_vol_abs_inventory\n",
     );
 
     for summary in summaries {
         csv.push_str(&format!(
-            "{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
+            "{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
             summary.regime,
             summary.strategy_type,
             summary.best_spread,
@@ -199,6 +223,18 @@ fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
             summary.low_vol_steps,
             summary.normal_vol_steps,
             summary.high_vol_steps,
+            summary.low_vol_fills,
+            summary.normal_vol_fills,
+            summary.high_vol_fills,
+            summary.low_vol_fees,
+            summary.normal_vol_fees,
+            summary.high_vol_fees,
+            summary.low_vol_adverse_selection,
+            summary.normal_vol_adverse_selection,
+            summary.high_vol_adverse_selection,
+            summary.low_vol_avg_abs_inventory,
+            summary.normal_vol_avg_abs_inventory,
+            summary.high_vol_avg_abs_inventory,
         ));
     }
 
