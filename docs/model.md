@@ -35,6 +35,8 @@ The last schedule point whose `start_step` is less than or equal to the current 
 
 Regime-level execution attribution includes fills, fees, adverse selection, and average absolute inventory. PnL is intentionally not split by regime because inventory can be accumulated in one regime and marked in another.
 
+Per-step datasets are exported for the best-ranked strategy in each sweep. These datasets are intended as the bridge to later calibration and ML workflows without moving the simulator out of Rust.
+
 ## Strategy
 
 The current baseline strategy is an inventory-skewed market maker:

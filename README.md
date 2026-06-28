@@ -15,7 +15,7 @@ The long-term goal is an agentic market maker: a system where a controller can o
 - Models fills, fees, adverse selection, inventory, cash, and mark-to-market PnL.
 - Runs configurable multi-seed parameter sweeps.
 - Aggregates sweep results across multiple random seeds.
-- Writes ranked sweep results to CSV.
+- Writes ranked sweep results and best-strategy step datasets to CSV.
 
 ### Run
 

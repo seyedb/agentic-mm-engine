@@ -42,13 +42,19 @@ The terminal prints the top sweep results for each config. Full ranked sweeps ar
 target/reports/<config_name>.csv
 ```
 
+The best-ranked strategy for each config is replayed across the configured seeds and written as a per-step dataset:
+
+```text
+target/reports/<config_name>_best_steps.csv
+```
+
 The best result from each config is also written to:
 
 ```text
 target/reports/regime_summary.csv
 ```
 
-Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`, plus average regime step counts and execution attribution for low, normal, and high volatility.
+Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`, plus average regime step counts and execution attribution for low, normal, and high volatility. Step datasets include quote state, inventory, PnL, fills, fees, and adverse selection for ML/calibration work.
 
 ## Score
 

@@ -4,12 +4,14 @@ use std::fmt::Write;
 
 use crate::engine::metrics::SimulationMetrics;
 use crate::engine::simulation::{MarketRegime, SimulationConfig};
+use crate::engine::state::SystemState;
 use crate::experiment::{Experiment, ExperimentReport};
-use crate::strategy::QuoteStrategy;
+use crate::market::Quote;
 use crate::strategy::inventory_risk::InventoryRiskParams;
 use crate::strategy::market_maker::StrategyParams;
 use crate::strategy::regime_adaptive::RegimeAdaptiveVolatilityAwareParams;
 use crate::strategy::volatility_aware::VolatilityAwareParams;
+use crate::strategy::{QuoteStrategy, StrategyContext};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SweepConfig {
@@ -202,6 +204,48 @@ impl SweepStrategyParams {
             Self::FixedSpread { .. }
             | Self::VolatilityAware { .. }
             | Self::InventoryRisk { .. } => None,
+        }
+    }
+}
+
+impl QuoteStrategy for SweepStrategyParams {
+    fn quote(&self, state: &SystemState, context: &StrategyContext) -> Quote {
+        match self {
+            Self::FixedSpread { spread, skew_coeff } => StrategyParams {
+                spread: *spread,
+                skew_coeff: *skew_coeff,
+            }
+            .quote(state, context),
+            Self::VolatilityAware {
+                base_spread,
+                volatility_coeff,
+                skew_coeff,
+            } => VolatilityAwareParams {
+                base_spread: *base_spread,
+                volatility_coeff: *volatility_coeff,
+                skew_coeff: *skew_coeff,
+            }
+            .quote(state, context),
+            Self::InventoryRisk {
+                base_spread,
+                volatility_coeff,
+                risk_aversion,
+            } => InventoryRiskParams {
+                base_spread: *base_spread,
+                volatility_coeff: *volatility_coeff,
+                risk_aversion: *risk_aversion,
+            }
+            .quote(state, context),
+            Self::RegimeAdaptiveVolatilityAware {
+                low_vol,
+                normal_vol,
+                high_vol,
+            } => RegimeAdaptiveVolatilityAwareParams {
+                low_vol: low_vol.clone(),
+                normal_vol: normal_vol.clone(),
+                high_vol: high_vol.clone(),
+            }
+            .quote(state, context),
         }
     }
 }

@@ -1,3 +1,5 @@
+use mm_engine::engine::dataset::{append_step_dataset_rows, step_dataset_header};
+use mm_engine::engine::simulation::run_simulation;
 use mm_engine::sweep::{SweepConfig, SweepResult, run_parameter_sweep, sweep_results_to_csv};
 use std::env;
 use std::error::Error;
@@ -16,7 +18,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     for config_path in config_paths {
         let config = load_sweep_config(&config_path)?;
         let regime = config_name(&config, &config_path);
-        let results = run_parameter_sweep(config);
+        let results = run_parameter_sweep(config.clone());
 
         print_top_results(&regime, &config_path, &results);
 
@@ -24,7 +26,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         fs::write(&csv_path, sweep_results_to_csv(&results)).expect("failed to write sweep CSV");
 
         if let Some(best_result) = results.first() {
-            summaries.push(RegimeSummary::from_best_result(regime, best_result));
+            summaries.push(RegimeSummary::from_best_result(regime.clone(), best_result));
+            let step_dataset_path = output_dir.join(format!("{regime}_best_steps.csv"));
+            fs::write(
+                &step_dataset_path,
+                best_step_dataset_to_csv(&regime, &config, best_result),
+            )
+            .expect("failed to write best-step dataset CSV");
+
+            println!("wrote {}", step_dataset_path.display());
         }
 
         println!("\nwrote {}", csv_path.display());
@@ -107,6 +117,38 @@ fn optional_f64(value: Option<f64>) -> String {
     value
         .map(|value| format!("{value:.2}"))
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn best_step_dataset_to_csv(
+    regime: &str,
+    config: &SweepConfig,
+    best_result: &SweepResult,
+) -> String {
+    let mut csv = String::from(step_dataset_header());
+
+    for seed in sweep_seeds(config) {
+        let mut simulation = config.simulation.clone();
+        simulation.seed = seed;
+        let result = run_simulation(simulation, &best_result.strategy);
+
+        append_step_dataset_rows(
+            &mut csv,
+            regime,
+            best_result.strategy.strategy_type(),
+            seed,
+            &result,
+        );
+    }
+
+    csv
+}
+
+fn sweep_seeds(config: &SweepConfig) -> Vec<u64> {
+    if config.seeds.is_empty() {
+        vec![config.simulation.seed]
+    } else {
+        config.seeds.clone()
+    }
 }
 
 fn config_name(config: &SweepConfig, config_path: &Path) -> String {
