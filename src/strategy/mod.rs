@@ -1,3 +1,4 @@
+pub mod inventory_risk;
 pub mod market_maker;
 pub mod volatility_aware;
 

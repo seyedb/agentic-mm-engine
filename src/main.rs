@@ -61,11 +61,12 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
     println!("name: {regime}");
     println!("config: {}", config_path.display());
     println!(
-        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
         "rank",
         "runs",
         "spread",
         "vol",
+        "risk",
         "skew",
         "avg_pnl",
         "avg_fill",
@@ -81,12 +82,13 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
 
     for (index, result) in results.iter().take(10).enumerate() {
         println!(
-            "{:<4} {:>5} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+            "{:<4} {:>5} {:>8.2} {:>8} {:>8} {:>8} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
             index + 1,
             result.runs,
             result.strategy.primary_spread(),
             optional_f64(result.strategy.volatility_coeff()),
-            result.strategy.skew_coeff(),
+            optional_f64(result.strategy.risk_aversion()),
+            optional_f64(result.strategy.skew_coeff()),
             result.metrics.final_pnl,
             result.metrics.total_fills,
             result.metrics.total_fees,
@@ -127,7 +129,8 @@ struct RegimeSummary {
     strategy_type: String,
     best_spread: f64,
     best_volatility_coeff: Option<f64>,
-    best_skew: f64,
+    best_risk_aversion: Option<f64>,
+    best_skew: Option<f64>,
     runs: usize,
     best_score: f64,
     best_score_std: f64,
@@ -147,6 +150,7 @@ impl RegimeSummary {
             strategy_type: result.strategy.strategy_type().to_string(),
             best_spread: result.strategy.primary_spread(),
             best_volatility_coeff: result.strategy.volatility_coeff(),
+            best_risk_aversion: result.strategy.risk_aversion(),
             best_skew: result.strategy.skew_coeff(),
             runs: result.runs,
             best_score: result.score,
@@ -164,17 +168,18 @@ impl RegimeSummary {
 
 fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
     let mut csv = String::from(
-        "regime,strategy_type,best_spread,best_volatility_coeff,best_skew,runs,best_score,best_score_std,best_stable_score,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory\n",
+        "regime,strategy_type,best_spread,best_volatility_coeff,best_risk_aversion,best_skew,runs,best_score,best_score_std,best_stable_score,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory\n",
     );
 
     for summary in summaries {
         csv.push_str(&format!(
-            "{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
+            "{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
             summary.regime,
             summary.strategy_type,
             summary.best_spread,
             optional_csv_f64(summary.best_volatility_coeff),
-            summary.best_skew,
+            optional_csv_f64(summary.best_risk_aversion),
+            optional_csv_f64(summary.best_skew),
             summary.runs,
             summary.best_score,
             summary.best_score_std,

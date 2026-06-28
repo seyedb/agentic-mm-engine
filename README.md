@@ -11,9 +11,9 @@ The long-term goal is an agentic market maker: a system where a controller can o
 
 ### What It Does
 
-- Simulates a market-making strategy with inventory-aware quote skew.
+- Simulates fixed-spread, volatility-aware, and inventory-risk market-making strategies.
 - Models fills, fees, adverse selection, inventory, cash, and mark-to-market PnL.
-- Runs configurable spread/skew parameter sweeps.
+- Runs configurable multi-seed parameter sweeps.
 - Aggregates sweep results across multiple random seeds.
 - Writes ranked sweep results to CSV.
 
@@ -23,9 +23,11 @@ The long-term goal is an agentic market maker: a system where a controller can o
 cargo run
 cargo run -- configs/baseline_sweep.json
 cargo run -- configs/baseline_volatility_aware_sweep.json
+cargo run -- configs/baseline_inventory_risk_sweep.json
 cargo run -- configs/high_volatility_sweep.json
 cargo run -- configs/volatility_aware_sweep.json
-cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep.json configs/high_volatility_sweep.json configs/volatility_aware_sweep.json
+cargo run -- configs/high_volatility_inventory_risk_sweep.json
+cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep.json configs/baseline_inventory_risk_sweep.json configs/high_volatility_sweep.json configs/volatility_aware_sweep.json configs/high_volatility_inventory_risk_sweep.json
 ```
 
 The default config is `configs/baseline_sweep.json`.

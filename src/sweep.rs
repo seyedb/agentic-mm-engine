@@ -6,6 +6,7 @@ use crate::engine::metrics::SimulationMetrics;
 use crate::engine::simulation::SimulationConfig;
 use crate::experiment::{Experiment, ExperimentReport};
 use crate::strategy::QuoteStrategy;
+use crate::strategy::inventory_risk::InventoryRiskParams;
 use crate::strategy::market_maker::StrategyParams;
 use crate::strategy::volatility_aware::VolatilityAwareParams;
 
@@ -34,6 +35,12 @@ pub enum StrategySweepConfig {
         volatility_coeffs: Vec<f64>,
         skew_coeffs: Vec<f64>,
     },
+    #[serde(rename = "inventory_risk")]
+    InventoryRisk {
+        base_spreads: Vec<f64>,
+        volatility_coeffs: Vec<f64>,
+        risk_aversions: Vec<f64>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,21 +68,29 @@ pub enum SweepStrategyParams {
         volatility_coeff: f64,
         skew_coeff: f64,
     },
+    InventoryRisk {
+        base_spread: f64,
+        volatility_coeff: f64,
+        risk_aversion: f64,
+    },
 }
 
 impl SweepStrategyParams {
     pub fn primary_spread(&self) -> f64 {
         match self {
             Self::FixedSpread { spread, .. } => *spread,
-            Self::VolatilityAware { base_spread, .. } => *base_spread,
+            Self::VolatilityAware { base_spread, .. } | Self::InventoryRisk { base_spread, .. } => {
+                *base_spread
+            }
         }
     }
 
-    pub fn skew_coeff(&self) -> f64 {
+    pub fn skew_coeff(&self) -> Option<f64> {
         match self {
             Self::FixedSpread { skew_coeff, .. } | Self::VolatilityAware { skew_coeff, .. } => {
-                *skew_coeff
+                Some(*skew_coeff)
             }
+            Self::InventoryRisk { .. } => None,
         }
     }
 
@@ -84,7 +99,17 @@ impl SweepStrategyParams {
             Self::FixedSpread { .. } => None,
             Self::VolatilityAware {
                 volatility_coeff, ..
+            }
+            | Self::InventoryRisk {
+                volatility_coeff, ..
             } => Some(*volatility_coeff),
+        }
+    }
+
+    pub fn risk_aversion(&self) -> Option<f64> {
+        match self {
+            Self::InventoryRisk { risk_aversion, .. } => Some(*risk_aversion),
+            Self::FixedSpread { .. } | Self::VolatilityAware { .. } => None,
         }
     }
 
@@ -92,6 +117,7 @@ impl SweepStrategyParams {
         match self {
             Self::FixedSpread { .. } => "fixed_spread",
             Self::VolatilityAware { .. } => "volatility_aware",
+            Self::InventoryRisk { .. } => "inventory_risk",
         }
     }
 }
@@ -166,6 +192,17 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
             volatility_coeffs,
             skew_coeffs,
         ),
+        StrategySweepConfig::InventoryRisk {
+            base_spreads,
+            volatility_coeffs,
+            risk_aversions,
+        } => run_inventory_risk_sweep(
+            &config.simulation,
+            &seeds,
+            base_spreads,
+            volatility_coeffs,
+            risk_aversions,
+        ),
     };
 
     for result in &mut results {
@@ -181,7 +218,7 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
 
 pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
     let mut csv = String::from(
-        "rank,experiment,strategy_type,spread,volatility_coeff,skew,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
+        "rank,experiment,strategy_type,spread,volatility_coeff,risk_aversion,skew,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
          avg_max_pnl,avg_max_drawdown,avg_final_inventory,avg_max_abs_inventory,\
          max_drawdown_std,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,\
          avg_traded_notional,avg_total_fees,avg_total_adverse_selection\n",
@@ -192,13 +229,14 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
 
         writeln!(
             csv,
-            "{},{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
+            "{},{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
             index + 1,
             result.name,
             result.strategy.strategy_type(),
             result.strategy.primary_spread(),
             optional_f64(result.strategy.volatility_coeff()),
-            result.strategy.skew_coeff(),
+            optional_f64(result.strategy.risk_aversion()),
+            optional_f64(result.strategy.skew_coeff()),
             result.runs,
             result.score,
             result.stability.score_std,
@@ -397,6 +435,44 @@ fn run_volatility_aware_sweep(
     results
 }
 
+fn run_inventory_risk_sweep(
+    simulation: &SimulationConfig,
+    seeds: &[u64],
+    base_spreads: &[f64],
+    volatility_coeffs: &[f64],
+    risk_aversions: &[f64],
+) -> Vec<SweepResult> {
+    let mut results =
+        Vec::with_capacity(base_spreads.len() * volatility_coeffs.len() * risk_aversions.len());
+
+    for base_spread in base_spreads {
+        for volatility_coeff in volatility_coeffs {
+            for risk_aversion in risk_aversions {
+                let strategy = InventoryRiskParams {
+                    base_spread: *base_spread,
+                    volatility_coeff: *volatility_coeff,
+                    risk_aversion: *risk_aversion,
+                };
+                let name = format!(
+                    "base_{base_spread:.2}_vol_{volatility_coeff:.2}_risk_{risk_aversion:.2}"
+                );
+                let reports = run_seeded_reports(simulation, seeds, &name, &strategy);
+                let sweep_strategy = SweepStrategyParams::InventoryRisk {
+                    base_spread: *base_spread,
+                    volatility_coeff: *volatility_coeff,
+                    risk_aversion: *risk_aversion,
+                };
+
+                if let Some(result) = aggregate_reports(name, sweep_strategy, &reports) {
+                    results.push(result);
+                }
+            }
+        }
+    }
+
+    results
+}
+
 fn score_result(result: &SweepResult, scoring: ScoringConfig) -> f64 {
     result.metrics.final_pnl
         - scoring.drawdown_weight * result.metrics.max_drawdown
@@ -522,6 +598,7 @@ mod tests {
         let csv = sweep_results_to_csv(&results);
 
         assert!(csv.starts_with("rank,experiment,strategy_type,spread"));
+        assert!(csv.contains("risk_aversion"));
         assert!(csv.contains("stable_score"));
         assert!(csv.contains("spread_0.30_skew_0.05"));
         assert_eq!(csv.lines().count(), 2);
@@ -619,6 +696,36 @@ mod tests {
             results
                 .iter()
                 .all(|result| result.strategy.strategy_type() == "volatility_aware")
+        );
+    }
+
+    #[test]
+    fn inventory_risk_sweep_runs_each_parameter_combination() {
+        let results = run_parameter_sweep(SweepConfig {
+            name: None,
+            simulation: SimulationConfig {
+                steps: 100,
+                ..SimulationConfig::default()
+            },
+            seeds: vec![1],
+            strategy: StrategySweepConfig::InventoryRisk {
+                base_spreads: vec![0.2, 0.3],
+                volatility_coeffs: vec![1.0, 2.0],
+                risk_aversions: vec![0.0, 2.0],
+            },
+            scoring: ScoringConfig::default(),
+        });
+
+        assert_eq!(results.len(), 8);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.strategy.strategy_type() == "inventory_risk")
+        );
+        assert!(
+            results
+                .iter()
+                .all(|result| result.strategy.risk_aversion().is_some())
         );
     }
 }

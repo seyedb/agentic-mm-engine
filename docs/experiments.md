@@ -8,9 +8,11 @@ Experiments are configured with JSON files in `configs/`.
 cargo run
 cargo run -- configs/baseline_sweep.json
 cargo run -- configs/baseline_volatility_aware_sweep.json
+cargo run -- configs/baseline_inventory_risk_sweep.json
 cargo run -- configs/high_volatility_sweep.json
 cargo run -- configs/volatility_aware_sweep.json
-cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep.json configs/high_volatility_sweep.json configs/volatility_aware_sweep.json
+cargo run -- configs/high_volatility_inventory_risk_sweep.json
+cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep.json configs/baseline_inventory_risk_sweep.json configs/high_volatility_sweep.json configs/volatility_aware_sweep.json configs/high_volatility_inventory_risk_sweep.json
 ```
 
 The default config is `configs/baseline_sweep.json`.
@@ -25,7 +27,7 @@ A sweep config contains:
 - strategy sweep settings
 - scoring settings
 
-The runner evaluates every spread/skew combination across the configured seeds, averages the metrics, tracks stability statistics, and ranks the aggregate results.
+The runner evaluates every configured strategy parameter combination across the configured seeds, averages the metrics, tracks stability statistics, and ranks the aggregate results.
 
 ## Output
 
@@ -68,5 +70,7 @@ This keeps high-PnL candidates visible while favoring parameter sets that behave
 
 - `baseline_sweep.json`: lower-volatility baseline environment
 - `baseline_volatility_aware_sweep.json`: lower-volatility baseline using volatility-aware quoting
+- `baseline_inventory_risk_sweep.json`: lower-volatility baseline using inventory-risk quoting
 - `high_volatility_sweep.json`: higher volatility, noisier fills, stronger adverse selection
 - `volatility_aware_sweep.json`: high-volatility environment using volatility-aware quoting
+- `high_volatility_inventory_risk_sweep.json`: high-volatility environment using inventory-risk quoting

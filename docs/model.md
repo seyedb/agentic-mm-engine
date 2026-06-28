@@ -27,6 +27,17 @@ The project also includes a volatility-aware strategy. It widens the effective s
 effective_spread = base_spread + volatility_coeff * estimated_volatility
 ```
 
+The inventory-risk strategy adds an Avellaneda-Stoikov-inspired reservation price:
+
+```text
+reservation_price = mid_price - risk_aversion * inventory * estimated_volatility^2
+effective_spread = base_spread
+                 + volatility_coeff * estimated_volatility
+                 + risk_aversion * estimated_volatility^2
+```
+
+Positive inventory lowers the reservation price, making the strategy more willing to sell and less willing to buy. Higher volatility widens quotes and increases the inventory-risk adjustment.
+
 ## Fills
 
 A quote is filled when the noisy market price crosses it:
