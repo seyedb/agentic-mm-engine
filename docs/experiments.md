@@ -56,6 +56,12 @@ target/reports/regime_summary.csv
 
 Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`, plus average regime step counts and execution attribution for low, normal, and high volatility. Step datasets include quote state, inventory, PnL, fills, fees, and adverse selection for ML/calibration work.
 
+Step datasets can be inspected with the Python research utility:
+
+```bash
+python3 research/analyze_steps.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
+```
+
 ## Score
 
 The raw score is intentionally simple:

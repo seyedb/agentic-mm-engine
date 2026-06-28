@@ -36,6 +36,12 @@ cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep
 
 The default config is `configs/baseline_sweep.json`.
 
+Analyze an exported best-strategy step dataset:
+
+```bash
+python3 research/analyze_steps.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
+```
+
 ### Verify
 
 ```bash
