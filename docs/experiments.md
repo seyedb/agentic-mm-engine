@@ -44,7 +44,7 @@ The best result from each config is also written to:
 target/reports/regime_summary.csv
 ```
 
-Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`.
+Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`, plus average regime step counts for low, normal, and high volatility.
 
 ## Score
 

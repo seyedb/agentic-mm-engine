@@ -141,6 +141,9 @@ struct RegimeSummary {
     max_drawdown: f64,
     max_drawdown_std: f64,
     max_abs_inventory: f64,
+    low_vol_steps: f64,
+    normal_vol_steps: f64,
+    high_vol_steps: f64,
 }
 
 impl RegimeSummary {
@@ -162,18 +165,21 @@ impl RegimeSummary {
             max_drawdown: result.metrics.max_drawdown,
             max_drawdown_std: result.stability.max_drawdown_std,
             max_abs_inventory: result.metrics.max_abs_inventory,
+            low_vol_steps: result.metrics.low_vol_steps,
+            normal_vol_steps: result.metrics.normal_vol_steps,
+            high_vol_steps: result.metrics.high_vol_steps,
         }
     }
 }
 
 fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
     let mut csv = String::from(
-        "regime,strategy_type,best_spread,best_volatility_coeff,best_risk_aversion,best_skew,runs,best_score,best_score_std,best_stable_score,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory\n",
+        "regime,strategy_type,best_spread,best_volatility_coeff,best_risk_aversion,best_skew,runs,best_score,best_score_std,best_stable_score,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps\n",
     );
 
     for summary in summaries {
         csv.push_str(&format!(
-            "{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
+            "{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
             summary.regime,
             summary.strategy_type,
             summary.best_spread,
@@ -190,6 +196,9 @@ fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
             summary.max_drawdown,
             summary.max_drawdown_std,
             summary.max_abs_inventory,
+            summary.low_vol_steps,
+            summary.normal_vol_steps,
+            summary.high_vol_steps,
         ));
     }
 

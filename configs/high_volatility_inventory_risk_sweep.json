@@ -12,6 +12,10 @@
       "distance_decay": 4.0,
       "volatility_boost": 1.0
     },
+    "regime": {
+      "low_volatility_threshold": 0.08,
+      "high_volatility_threshold": 0.18
+    },
     "order_quantity": 1.0,
     "fee_rate": 0.001,
     "adverse_selection_per_fill": 0.04,

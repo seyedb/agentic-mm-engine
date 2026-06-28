@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::engine::simulation::SimulationResult;
+use crate::engine::simulation::{MarketRegime, SimulationResult};
 use crate::market::FillSide;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -20,6 +20,9 @@ pub struct SimulationMetrics {
     pub traded_notional: f64,
     pub total_fees: f64,
     pub total_adverse_selection: f64,
+    pub low_vol_steps: usize,
+    pub normal_vol_steps: usize,
+    pub high_vol_steps: usize,
 }
 
 impl SimulationMetrics {
@@ -40,6 +43,9 @@ impl SimulationMetrics {
         let mut traded_notional = 0.0;
         let mut total_fees = 0.0;
         let mut total_adverse_selection = 0.0;
+        let mut low_vol_steps = 0;
+        let mut normal_vol_steps = 0;
+        let mut high_vol_steps = 0;
 
         for step in &result.steps {
             min_pnl = min_pnl.min(step.pnl);
@@ -51,6 +57,12 @@ impl SimulationMetrics {
             max_abs_inventory = f64::max(max_abs_inventory, abs_inventory);
             sum_abs_inventory += abs_inventory;
             total_adverse_selection += step.adverse_selection_move.abs();
+
+            match step.regime {
+                MarketRegime::LowVol => low_vol_steps += 1,
+                MarketRegime::NormalVol => normal_vol_steps += 1,
+                MarketRegime::HighVol => high_vol_steps += 1,
+            }
 
             for fill in &step.fills {
                 total_fills += 1;
@@ -81,6 +93,9 @@ impl SimulationMetrics {
             traded_notional,
             total_fees,
             total_adverse_selection,
+            low_vol_steps,
+            normal_vol_steps,
+            high_vol_steps,
         })
     }
 }
@@ -116,6 +131,10 @@ mod tests {
         assert!(metrics.traded_notional >= 0.0);
         assert!(metrics.total_fees >= 0.0);
         assert!(metrics.total_adverse_selection >= 0.0);
+        assert_eq!(
+            metrics.steps,
+            metrics.low_vol_steps + metrics.normal_vol_steps + metrics.high_vol_steps
+        );
     }
 
     #[test]

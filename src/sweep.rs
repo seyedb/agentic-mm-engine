@@ -138,6 +138,9 @@ pub struct SweepMetrics {
     pub traded_notional: f64,
     pub total_fees: f64,
     pub total_adverse_selection: f64,
+    pub low_vol_steps: f64,
+    pub normal_vol_steps: f64,
+    pub high_vol_steps: f64,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -221,7 +224,7 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
         "rank,experiment,strategy_type,spread,volatility_coeff,risk_aversion,skew,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
          avg_max_pnl,avg_max_drawdown,avg_final_inventory,avg_max_abs_inventory,\
          max_drawdown_std,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,\
-         avg_traded_notional,avg_total_fees,avg_total_adverse_selection\n",
+         avg_traded_notional,avg_total_fees,avg_total_adverse_selection,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps\n",
     );
 
     for (index, result) in results.iter().enumerate() {
@@ -229,7 +232,7 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
 
         writeln!(
             csv,
-            "{},{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
+            "{},{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
             index + 1,
             result.name,
             result.strategy.strategy_type(),
@@ -258,6 +261,9 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
             metrics.traded_notional,
             metrics.total_fees,
             metrics.total_adverse_selection,
+            metrics.low_vol_steps,
+            metrics.normal_vol_steps,
+            metrics.high_vol_steps,
         )
         .expect("writing to a String should not fail");
     }
@@ -320,6 +326,9 @@ fn aggregate_reports(
         traded_notional: 0.0,
         total_fees: 0.0,
         total_adverse_selection: 0.0,
+        low_vol_steps: 0.0,
+        normal_vol_steps: 0.0,
+        high_vol_steps: 0.0,
     };
 
     for report in reports {
@@ -337,6 +346,9 @@ fn aggregate_reports(
         metrics.traded_notional += report.metrics.traded_notional;
         metrics.total_fees += report.metrics.total_fees;
         metrics.total_adverse_selection += report.metrics.total_adverse_selection;
+        metrics.low_vol_steps += report.metrics.low_vol_steps as f64;
+        metrics.normal_vol_steps += report.metrics.normal_vol_steps as f64;
+        metrics.high_vol_steps += report.metrics.high_vol_steps as f64;
     }
 
     let runs_f64 = runs as f64;
@@ -354,6 +366,9 @@ fn aggregate_reports(
     metrics.traded_notional /= runs_f64;
     metrics.total_fees /= runs_f64;
     metrics.total_adverse_selection /= runs_f64;
+    metrics.low_vol_steps /= runs_f64;
+    metrics.normal_vol_steps /= runs_f64;
+    metrics.high_vol_steps /= runs_f64;
 
     Some(SweepResult {
         name,
@@ -600,6 +615,9 @@ mod tests {
         assert!(csv.starts_with("rank,experiment,strategy_type,spread"));
         assert!(csv.contains("risk_aversion"));
         assert!(csv.contains("stable_score"));
+        assert!(csv.contains("avg_low_vol_steps"));
+        assert!(csv.contains("avg_normal_vol_steps"));
+        assert!(csv.contains("avg_high_vol_steps"));
         assert!(csv.contains("spread_0.30_skew_0.05"));
         assert_eq!(csv.lines().count(), 2);
     }

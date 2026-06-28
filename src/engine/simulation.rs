@@ -16,6 +16,8 @@ pub struct SimulationConfig {
     pub fill_price_noise: f64,
     #[serde(default)]
     pub fill_model: FillModelConfig,
+    #[serde(default)]
+    pub regime: RegimeConfig,
     pub order_quantity: f64,
     pub fee_rate: f64,
     pub adverse_selection_per_fill: f64,
@@ -31,6 +33,7 @@ impl Default for SimulationConfig {
             price_volatility: 0.1,
             fill_price_noise: 0.1,
             fill_model: FillModelConfig::default(),
+            regime: RegimeConfig::default(),
             order_quantity: 1.0,
             fee_rate: 0.001,
             adverse_selection_per_fill: 0.02,
@@ -53,10 +56,45 @@ pub enum FillModelConfig {
     },
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RegimeConfig {
+    pub low_volatility_threshold: f64,
+    pub high_volatility_threshold: f64,
+}
+
+impl Default for RegimeConfig {
+    fn default() -> Self {
+        Self {
+            low_volatility_threshold: 0.08,
+            high_volatility_threshold: 0.18,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MarketRegime {
+    LowVol,
+    NormalVol,
+    HighVol,
+}
+
+impl MarketRegime {
+    fn classify(estimated_volatility: f64, config: RegimeConfig) -> Self {
+        if estimated_volatility < config.low_volatility_threshold {
+            Self::LowVol
+        } else if estimated_volatility > config.high_volatility_threshold {
+            Self::HighVol
+        } else {
+            Self::NormalVol
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationStep {
     pub mid_price: f64,
     pub estimated_volatility: f64,
+    pub regime: MarketRegime,
     pub quote: Quote,
     pub fills: Vec<Fill>,
     pub adverse_selection_move: f64,
@@ -95,6 +133,7 @@ where
         let context = StrategyContext {
             estimated_volatility: volatility_estimator.estimate(),
         };
+        let regime = MarketRegime::classify(context.estimated_volatility, config.regime);
 
         let quote = strategy.quote(&state, &context);
         let fills = simulate_fills(
@@ -118,6 +157,7 @@ where
         steps.push(SimulationStep {
             mid_price: state.mid_price,
             estimated_volatility: context.estimated_volatility,
+            regime,
             quote,
             fills,
             adverse_selection_move,
@@ -391,6 +431,45 @@ mod tests {
                 .steps
                 .iter()
                 .any(|step| step.estimated_volatility > 0.0)
+        );
+    }
+
+    #[test]
+    fn market_regime_classifies_volatility_thresholds() {
+        let config = RegimeConfig {
+            low_volatility_threshold: 0.1,
+            high_volatility_threshold: 0.3,
+        };
+
+        assert_eq!(MarketRegime::classify(0.05, config), MarketRegime::LowVol);
+        assert_eq!(MarketRegime::classify(0.2, config), MarketRegime::NormalVol);
+        assert_eq!(MarketRegime::classify(0.4, config), MarketRegime::HighVol);
+    }
+
+    #[test]
+    fn simulation_records_market_regime() {
+        let strategy = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.05,
+        };
+
+        let result = run_simulation(
+            SimulationConfig {
+                steps: 100,
+                regime: RegimeConfig {
+                    low_volatility_threshold: 0.0,
+                    high_volatility_threshold: 0.05,
+                },
+                ..SimulationConfig::default()
+            },
+            &strategy,
+        );
+
+        assert!(
+            result
+                .steps
+                .iter()
+                .any(|step| step.regime == MarketRegime::HighVol)
         );
     }
 
