@@ -1,18 +1,20 @@
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use rand_distr::{Distribution, Normal};
+use rand_distr::{Distribution, Normal, StandardNormal};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::state::SystemState;
 use crate::market::{Fill, Quote};
 use crate::strategy::{QuoteStrategy, StrategyContext};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationConfig {
     pub steps: usize,
     pub initial_mid_price: f64,
     pub seed: u64,
     pub price_volatility: f64,
+    #[serde(default)]
+    pub volatility_schedule: Vec<VolatilitySchedulePoint>,
     pub fill_price_noise: f64,
     #[serde(default)]
     pub fill_model: FillModelConfig,
@@ -31,6 +33,7 @@ impl Default for SimulationConfig {
             initial_mid_price: 100.0,
             seed: 42,
             price_volatility: 0.1,
+            volatility_schedule: Vec::new(),
             fill_price_noise: 0.1,
             fill_model: FillModelConfig::default(),
             regime: RegimeConfig::default(),
@@ -40,6 +43,12 @@ impl Default for SimulationConfig {
             volatility_window: 50,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct VolatilitySchedulePoint {
+    pub start_step: usize,
+    pub price_volatility: f64,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -121,15 +130,16 @@ where
 {
     let mut state = SystemState::new(config.initial_mid_price);
     let mut rng = StdRng::seed_from_u64(config.seed);
-    let price_move = Normal::new(0.0, config.price_volatility).unwrap();
     let fill_noise = Normal::new(0.0, config.fill_price_noise).unwrap();
     let mut volatility_estimator = RollingVolatility::new(config.volatility_window);
 
     let mut steps = Vec::with_capacity(config.steps);
 
-    for _ in 0..config.steps {
+    for step_index in 0..config.steps {
         let previous_mid_price = state.mid_price;
-        state.mid_price += price_move.sample(&mut rng);
+        let price_volatility = price_volatility_at_step(&config, step_index);
+        let price_shock: f64 = StandardNormal.sample(&mut rng);
+        state.mid_price += price_shock * price_volatility;
         volatility_estimator.push(state.mid_price - previous_mid_price);
         let estimated_volatility = volatility_estimator.estimate();
         let regime = MarketRegime::classify(estimated_volatility, config.regime);
@@ -171,6 +181,17 @@ where
     }
 
     SimulationResult { steps }
+}
+
+fn price_volatility_at_step(config: &SimulationConfig, step_index: usize) -> f64 {
+    config
+        .volatility_schedule
+        .iter()
+        .filter(|point| point.start_step <= step_index)
+        .max_by_key(|point| point.start_step)
+        .map(|point| point.price_volatility)
+        .unwrap_or(config.price_volatility)
+        .max(0.0)
 }
 
 struct RollingVolatility {
@@ -468,6 +489,79 @@ mod tests {
             &strategy,
         );
 
+        assert!(
+            result
+                .steps
+                .iter()
+                .any(|step| step.regime == MarketRegime::HighVol)
+        );
+    }
+
+    #[test]
+    fn volatility_schedule_uses_last_active_point() {
+        let config = SimulationConfig {
+            price_volatility: 0.1,
+            volatility_schedule: vec![
+                VolatilitySchedulePoint {
+                    start_step: 0,
+                    price_volatility: 0.05,
+                },
+                VolatilitySchedulePoint {
+                    start_step: 10,
+                    price_volatility: 0.25,
+                },
+            ],
+            ..SimulationConfig::default()
+        };
+
+        assert_eq!(price_volatility_at_step(&config, 0), 0.05);
+        assert_eq!(price_volatility_at_step(&config, 9), 0.05);
+        assert_eq!(price_volatility_at_step(&config, 10), 0.25);
+        assert_eq!(price_volatility_at_step(&config, 99), 0.25);
+    }
+
+    #[test]
+    fn volatility_schedule_can_create_mixed_regimes() {
+        let strategy = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.05,
+        };
+
+        let result = run_simulation(
+            SimulationConfig {
+                steps: 300,
+                volatility_window: 20,
+                volatility_schedule: vec![
+                    VolatilitySchedulePoint {
+                        start_step: 0,
+                        price_volatility: 0.03,
+                    },
+                    VolatilitySchedulePoint {
+                        start_step: 100,
+                        price_volatility: 0.25,
+                    },
+                    VolatilitySchedulePoint {
+                        start_step: 200,
+                        price_volatility: 0.1,
+                    },
+                ],
+                ..SimulationConfig::default()
+            },
+            &strategy,
+        );
+
+        assert!(
+            result
+                .steps
+                .iter()
+                .any(|step| step.regime == MarketRegime::LowVol)
+        );
+        assert!(
+            result
+                .steps
+                .iter()
+                .any(|step| step.regime == MarketRegime::NormalVol)
+        );
         assert!(
             result
                 .steps

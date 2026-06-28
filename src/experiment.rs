@@ -26,12 +26,12 @@ where
     S: Clone + QuoteStrategy,
 {
     pub fn run(&self) -> Option<ExperimentReport> {
-        let result = run_simulation(self.simulation, &self.strategy);
+        let result = run_simulation(self.simulation.clone(), &self.strategy);
         let metrics = SimulationMetrics::from_result(&result)?;
 
         Some(ExperimentReport {
             name: self.name.clone(),
-            simulation: self.simulation,
+            simulation: self.simulation.clone(),
             metrics,
         })
     }

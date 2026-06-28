@@ -14,7 +14,9 @@ cargo run -- configs/high_volatility_sweep.json
 cargo run -- configs/volatility_aware_sweep.json
 cargo run -- configs/high_volatility_inventory_risk_sweep.json
 cargo run -- configs/high_volatility_regime_adaptive_sweep.json
-cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep.json configs/baseline_inventory_risk_sweep.json configs/baseline_regime_adaptive_sweep.json configs/high_volatility_sweep.json configs/volatility_aware_sweep.json configs/high_volatility_inventory_risk_sweep.json configs/high_volatility_regime_adaptive_sweep.json
+cargo run -- configs/mixed_regime_volatility_aware_sweep.json
+cargo run -- configs/mixed_regime_adaptive_sweep.json
+cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep.json configs/baseline_inventory_risk_sweep.json configs/baseline_regime_adaptive_sweep.json configs/high_volatility_sweep.json configs/volatility_aware_sweep.json configs/high_volatility_inventory_risk_sweep.json configs/high_volatility_regime_adaptive_sweep.json configs/mixed_regime_volatility_aware_sweep.json configs/mixed_regime_adaptive_sweep.json
 ```
 
 The default config is `configs/baseline_sweep.json`.
@@ -79,3 +81,5 @@ This keeps high-PnL candidates visible while favoring parameter sets that behave
 - `volatility_aware_sweep.json`: high-volatility environment using volatility-aware quoting
 - `high_volatility_inventory_risk_sweep.json`: high-volatility environment using inventory-risk quoting
 - `high_volatility_regime_adaptive_sweep.json`: high-volatility environment using regime-conditioned volatility-aware quoting
+- `mixed_regime_volatility_aware_sweep.json`: scheduled low/normal/high-volatility environment using volatility-aware quoting
+- `mixed_regime_adaptive_sweep.json`: scheduled low/normal/high-volatility environment using regime-conditioned volatility-aware quoting

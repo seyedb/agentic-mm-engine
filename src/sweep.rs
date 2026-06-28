@@ -387,7 +387,7 @@ fn run_seeded_reports(
     seeds
         .iter()
         .filter_map(|seed| {
-            let mut seeded_simulation = *simulation;
+            let mut seeded_simulation = simulation.clone();
             seeded_simulation.seed = *seed;
 
             Experiment::new(name, seeded_simulation, strategy.clone()).run()
