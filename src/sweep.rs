@@ -45,6 +45,7 @@ pub struct SweepResult {
     pub stability: SweepStability,
     pub inactivity_penalty: f64,
     pub score: f64,
+    pub stable_score: f64,
     #[serde(skip)]
     seed_metrics: Vec<SimulationMetrics>,
 }
@@ -126,6 +127,8 @@ pub struct ScoringConfig {
     pub inventory_weight: f64,
     pub min_fills: usize,
     pub missing_fill_penalty: f64,
+    #[serde(default = "default_stability_weight")]
+    pub stability_weight: f64,
 }
 
 impl Default for ScoringConfig {
@@ -135,8 +138,13 @@ impl Default for ScoringConfig {
             inventory_weight: 1.0,
             min_fills: 50,
             missing_fill_penalty: 0.25,
+            stability_weight: default_stability_weight(),
         }
     }
+}
+
+fn default_stability_weight() -> f64 {
+    0.25
 }
 
 pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
@@ -164,15 +172,16 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
         result.inactivity_penalty = inactivity_penalty(result, scoring);
         result.score = score_result(result, scoring);
         result.stability = stability_for_metrics(&result.seed_metrics, scoring);
+        result.stable_score = stable_score_result(result, scoring);
     }
 
-    results.sort_by(|a, b| b.score.total_cmp(&a.score));
+    results.sort_by(|a, b| b.stable_score.total_cmp(&a.stable_score));
     results
 }
 
 pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
     let mut csv = String::from(
-        "rank,experiment,strategy_type,spread,volatility_coeff,skew,runs,score,score_std,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
+        "rank,experiment,strategy_type,spread,volatility_coeff,skew,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
          avg_max_pnl,avg_max_drawdown,avg_final_inventory,avg_max_abs_inventory,\
          max_drawdown_std,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,\
          avg_traded_notional,avg_total_fees,avg_total_adverse_selection\n",
@@ -183,7 +192,7 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
 
         writeln!(
             csv,
-            "{},{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
+            "{},{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
             index + 1,
             result.name,
             result.strategy.strategy_type(),
@@ -193,6 +202,7 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
             result.runs,
             result.score,
             result.stability.score_std,
+            result.stable_score,
             result.inactivity_penalty,
             metrics.final_pnl,
             result.stability.final_pnl_std,
@@ -315,6 +325,7 @@ fn aggregate_reports(
         stability: SweepStability::default(),
         inactivity_penalty: 0.0,
         score: 0.0,
+        stable_score: 0.0,
         seed_metrics: reports.iter().map(|report| report.metrics).collect(),
     })
 }
@@ -393,6 +404,10 @@ fn score_result(result: &SweepResult, scoring: ScoringConfig) -> f64 {
         - result.inactivity_penalty
 }
 
+fn stable_score_result(result: &SweepResult, scoring: ScoringConfig) -> f64 {
+    result.score - scoring.stability_weight * result.stability.score_std
+}
+
 fn inactivity_penalty(result: &SweepResult, scoring: ScoringConfig) -> f64 {
     let missing_fills = (scoring.min_fills as f64 - result.metrics.total_fills).max(0.0);
 
@@ -466,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn sweep_results_are_sorted_by_score_descending() {
+    fn sweep_results_are_sorted_by_stable_score_descending() {
         let results = run_parameter_sweep(SweepConfig {
             name: None,
             simulation: SimulationConfig {
@@ -484,7 +499,7 @@ mod tests {
         assert!(
             results
                 .windows(2)
-                .all(|window| window[0].score >= window[1].score)
+                .all(|window| window[0].stable_score >= window[1].stable_score)
         );
     }
 
@@ -507,6 +522,7 @@ mod tests {
         let csv = sweep_results_to_csv(&results);
 
         assert!(csv.starts_with("rank,experiment,strategy_type,spread"));
+        assert!(csv.contains("stable_score"));
         assert!(csv.contains("spread_0.30_skew_0.05"));
         assert_eq!(csv.lines().count(), 2);
     }
@@ -578,6 +594,7 @@ mod tests {
         assert!(results[0].stability.final_pnl_std >= 0.0);
         assert!(results[0].stability.max_drawdown_std >= 0.0);
         assert!(results[0].stability.score_std >= 0.0);
+        assert!(results[0].stable_score <= results[0].score);
     }
 
     #[test]

@@ -45,7 +45,7 @@ Multi-seed outputs include standard deviation fields such as `score_std`, `final
 
 ## Score
 
-The current score is intentionally simple:
+The raw score is intentionally simple:
 
 ```text
 score = final_pnl
@@ -55,6 +55,14 @@ score = final_pnl
 ```
 
 The inactivity penalty discourages strategies that avoid trading entirely.
+
+Rankings use a stability-adjusted score:
+
+```text
+stable_score = score - stability_weight * score_std
+```
+
+This keeps high-PnL candidates visible while favoring parameter sets that behave more consistently across seeds.
 
 ## Current Regimes
 

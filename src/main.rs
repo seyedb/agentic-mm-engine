@@ -61,7 +61,7 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
     println!("name: {regime}");
     println!("config: {}", config_path.display());
     println!(
-        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
         "rank",
         "runs",
         "spread",
@@ -74,12 +74,14 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
         "avg_dd",
         "pnl_sd",
         "idle",
-        "score"
+        "score",
+        "score_sd",
+        "stable"
     );
 
     for (index, result) in results.iter().take(10).enumerate() {
         println!(
-            "{:<4} {:>5} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+            "{:<4} {:>5} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
             index + 1,
             result.runs,
             result.strategy.primary_spread(),
@@ -93,6 +95,8 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
             result.stability.final_pnl_std,
             result.inactivity_penalty,
             result.score,
+            result.stability.score_std,
+            result.stable_score,
         );
     }
 }
@@ -127,6 +131,7 @@ struct RegimeSummary {
     runs: usize,
     best_score: f64,
     best_score_std: f64,
+    best_stable_score: f64,
     best_pnl: f64,
     best_pnl_std: f64,
     fills: f64,
@@ -146,6 +151,7 @@ impl RegimeSummary {
             runs: result.runs,
             best_score: result.score,
             best_score_std: result.stability.score_std,
+            best_stable_score: result.stable_score,
             best_pnl: result.metrics.final_pnl,
             best_pnl_std: result.stability.final_pnl_std,
             fills: result.metrics.total_fills,
@@ -158,12 +164,12 @@ impl RegimeSummary {
 
 fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
     let mut csv = String::from(
-        "regime,strategy_type,best_spread,best_volatility_coeff,best_skew,runs,best_score,best_score_std,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory\n",
+        "regime,strategy_type,best_spread,best_volatility_coeff,best_skew,runs,best_score,best_score_std,best_stable_score,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory\n",
     );
 
     for summary in summaries {
         csv.push_str(&format!(
-            "{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
+            "{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
             summary.regime,
             summary.strategy_type,
             summary.best_spread,
@@ -172,6 +178,7 @@ fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
             summary.runs,
             summary.best_score,
             summary.best_score_std,
+            summary.best_stable_score,
             summary.best_pnl,
             summary.best_pnl_std,
             summary.fills,
