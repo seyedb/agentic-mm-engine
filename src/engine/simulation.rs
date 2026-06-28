@@ -1,5 +1,5 @@
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use rand_distr::{Distribution, Normal};
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +14,8 @@ pub struct SimulationConfig {
     pub seed: u64,
     pub price_volatility: f64,
     pub fill_price_noise: f64,
+    #[serde(default)]
+    pub fill_model: FillModelConfig,
     pub order_quantity: f64,
     pub fee_rate: f64,
     pub adverse_selection_per_fill: f64,
@@ -28,12 +30,27 @@ impl Default for SimulationConfig {
             seed: 42,
             price_volatility: 0.1,
             fill_price_noise: 0.1,
+            fill_model: FillModelConfig::default(),
             order_quantity: 1.0,
             fee_rate: 0.001,
             adverse_selection_per_fill: 0.02,
             volatility_window: 50,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum FillModelConfig {
+    #[serde(rename = "crossing_noise")]
+    #[default]
+    CrossingNoise,
+    #[serde(rename = "distance_intensity")]
+    DistanceIntensity {
+        base_intensity: f64,
+        distance_decay: f64,
+        volatility_boost: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,8 +97,14 @@ where
         };
 
         let quote = strategy.quote(&state, &context);
-        let market_price = state.mid_price + fill_noise.sample(&mut rng);
-        let fills = simulate_fills(quote, market_price, config.order_quantity, config.fee_rate);
+        let fills = simulate_fills(
+            quote,
+            state.mid_price,
+            context.estimated_volatility,
+            &config,
+            &fill_noise,
+            &mut rng,
+        );
 
         for fill in &fills {
             state.apply_fill(*fill);
@@ -152,7 +175,45 @@ impl RollingVolatility {
     }
 }
 
-fn simulate_fills(quote: Quote, market_price: f64, quantity: f64, fee_rate: f64) -> Vec<Fill> {
+fn simulate_fills(
+    quote: Quote,
+    mid_price: f64,
+    estimated_volatility: f64,
+    config: &SimulationConfig,
+    fill_noise: &Normal<f64>,
+    rng: &mut StdRng,
+) -> Vec<Fill> {
+    match config.fill_model {
+        FillModelConfig::CrossingNoise => {
+            let market_price = mid_price + fill_noise.sample(rng);
+            crossing_noise_fills(quote, market_price, config.order_quantity, config.fee_rate)
+        }
+        FillModelConfig::DistanceIntensity {
+            base_intensity,
+            distance_decay,
+            volatility_boost,
+        } => distance_intensity_fills(
+            quote,
+            mid_price,
+            estimated_volatility,
+            DistanceIntensityParams {
+                base_intensity,
+                distance_decay,
+                volatility_boost,
+            },
+            config.order_quantity,
+            config.fee_rate,
+            rng,
+        ),
+    }
+}
+
+fn crossing_noise_fills(
+    quote: Quote,
+    market_price: f64,
+    quantity: f64,
+    fee_rate: f64,
+) -> Vec<Fill> {
     let mut fills = Vec::with_capacity(2);
 
     if market_price <= quote.bid {
@@ -166,6 +227,54 @@ fn simulate_fills(quote: Quote, market_price: f64, quantity: f64, fee_rate: f64)
     }
 
     fills
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DistanceIntensityParams {
+    base_intensity: f64,
+    distance_decay: f64,
+    volatility_boost: f64,
+}
+
+fn distance_intensity_fills(
+    quote: Quote,
+    mid_price: f64,
+    estimated_volatility: f64,
+    params: DistanceIntensityParams,
+    quantity: f64,
+    fee_rate: f64,
+    rng: &mut StdRng,
+) -> Vec<Fill> {
+    let mut fills = Vec::with_capacity(2);
+    let bid_distance = (mid_price - quote.bid).max(0.0);
+    let ask_distance = (quote.ask - mid_price).max(0.0);
+    let bid_probability = fill_probability(bid_distance, estimated_volatility, params);
+    let ask_probability = fill_probability(ask_distance, estimated_volatility, params);
+
+    if rng.random::<f64>() < bid_probability {
+        let fee = quote.bid * quantity * fee_rate;
+        fills.push(Fill::buy(quote.bid, quantity, fee));
+    }
+
+    if rng.random::<f64>() < ask_probability {
+        let fee = quote.ask * quantity * fee_rate;
+        fills.push(Fill::sell(quote.ask, quantity, fee));
+    }
+
+    fills
+}
+
+fn fill_probability(
+    quote_distance: f64,
+    estimated_volatility: f64,
+    params: DistanceIntensityParams,
+) -> f64 {
+    let volatility_multiplier = (1.0 + params.volatility_boost * estimated_volatility).max(0.0);
+    let probability = params.base_intensity
+        * (-params.distance_decay * quote_distance).exp()
+        * volatility_multiplier;
+
+    probability.clamp(0.0, 1.0)
 }
 
 fn apply_adverse_selection(
@@ -283,5 +392,65 @@ mod tests {
                 .iter()
                 .any(|step| step.estimated_volatility > 0.0)
         );
+    }
+
+    #[test]
+    fn default_fill_model_is_crossing_noise() {
+        assert!(matches!(
+            SimulationConfig::default().fill_model,
+            FillModelConfig::CrossingNoise
+        ));
+    }
+
+    #[test]
+    fn distance_intensity_probability_decays_with_distance() {
+        let params = DistanceIntensityParams {
+            base_intensity: 0.5,
+            distance_decay: 4.0,
+            volatility_boost: 0.0,
+        };
+
+        let near_probability = fill_probability(0.1, 0.0, params);
+        let far_probability = fill_probability(1.0, 0.0, params);
+
+        assert!(near_probability > far_probability);
+    }
+
+    #[test]
+    fn distance_intensity_probability_increases_with_volatility() {
+        let params = DistanceIntensityParams {
+            base_intensity: 0.1,
+            distance_decay: 2.0,
+            volatility_boost: 2.0,
+        };
+
+        let calm_probability = fill_probability(0.5, 0.1, params);
+        let volatile_probability = fill_probability(0.5, 0.5, params);
+
+        assert!(volatile_probability > calm_probability);
+    }
+
+    #[test]
+    fn distance_intensity_model_can_generate_fills() {
+        let strategy = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.0,
+        };
+
+        let result = run_simulation(
+            SimulationConfig {
+                steps: 10,
+                price_volatility: 0.0,
+                fill_model: FillModelConfig::DistanceIntensity {
+                    base_intensity: 1.0,
+                    distance_decay: 0.0,
+                    volatility_boost: 0.0,
+                },
+                ..SimulationConfig::default()
+            },
+            &strategy,
+        );
+
+        assert!(result.steps.iter().all(|step| !step.fills.is_empty()));
     }
 }

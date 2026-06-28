@@ -23,6 +23,7 @@ A sweep config contains:
 
 - an optional experiment name
 - simulation settings
+- fill model settings
 - optional seed values for multi-seed aggregation
 - strategy sweep settings
 - scoring settings
