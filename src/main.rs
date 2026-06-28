@@ -118,7 +118,9 @@ fn file_stem(config_path: &Path) -> String {
 
 struct RegimeSummary {
     regime: String,
+    strategy_type: String,
     best_spread: f64,
+    best_volatility_coeff: Option<f64>,
     best_skew: f64,
     runs: usize,
     best_score: f64,
@@ -132,7 +134,9 @@ impl RegimeSummary {
     fn from_best_result(regime: String, result: &SweepResult) -> Self {
         Self {
             regime,
+            strategy_type: result.strategy.strategy_type().to_string(),
             best_spread: result.strategy.primary_spread(),
+            best_volatility_coeff: result.strategy.volatility_coeff(),
             best_skew: result.strategy.skew_coeff(),
             runs: result.runs,
             best_score: result.score,
@@ -146,14 +150,16 @@ impl RegimeSummary {
 
 fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
     let mut csv = String::from(
-        "regime,best_spread,best_skew,runs,best_score,avg_best_pnl,avg_fills,avg_max_drawdown,avg_max_abs_inventory\n",
+        "regime,strategy_type,best_spread,best_volatility_coeff,best_skew,runs,best_score,avg_best_pnl,avg_fills,avg_max_drawdown,avg_max_abs_inventory\n",
     );
 
     for summary in summaries {
         csv.push_str(&format!(
-            "{},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
+            "{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
             summary.regime,
+            summary.strategy_type,
             summary.best_spread,
+            optional_csv_f64(summary.best_volatility_coeff),
             summary.best_skew,
             summary.runs,
             summary.best_score,
@@ -165,4 +171,8 @@ fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
     }
 
     csv
+}
+
+fn optional_csv_f64(value: Option<f64>) -> String {
+    value.map(|value| format!("{value:.6}")).unwrap_or_default()
 }
