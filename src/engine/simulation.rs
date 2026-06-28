@@ -71,9 +71,10 @@ impl Default for RegimeConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MarketRegime {
     LowVol,
+    #[default]
     NormalVol,
     HighVol,
 }
@@ -130,10 +131,12 @@ where
         let previous_mid_price = state.mid_price;
         state.mid_price += price_move.sample(&mut rng);
         volatility_estimator.push(state.mid_price - previous_mid_price);
+        let estimated_volatility = volatility_estimator.estimate();
+        let regime = MarketRegime::classify(estimated_volatility, config.regime);
         let context = StrategyContext {
-            estimated_volatility: volatility_estimator.estimate(),
+            estimated_volatility,
+            regime,
         };
-        let regime = MarketRegime::classify(context.estimated_volatility, config.regime);
 
         let quote = strategy.quote(&state, &context);
         let fills = simulate_fills(

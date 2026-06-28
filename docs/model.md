@@ -51,6 +51,8 @@ effective_spread = base_spread
 
 Positive inventory lowers the reservation price, making the strategy more willing to sell and less willing to buy. Higher volatility widens quotes and increases the inventory-risk adjustment.
 
+The regime-adaptive volatility-aware strategy selects a different volatility-aware parameter set for `LowVol`, `NormalVol`, and `HighVol` regimes. This keeps the quoting rule simple while allowing spreads and inventory skew to depend on the current volatility state.
+
 ## Fills
 
 The legacy fill model samples a noisy market price and fills crossed quotes:

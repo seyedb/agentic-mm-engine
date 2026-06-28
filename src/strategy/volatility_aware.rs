@@ -41,6 +41,7 @@ mod tests {
         let state = SystemState::new(100.0);
         let context = StrategyContext {
             estimated_volatility: 0.0,
+            ..StrategyContext::default()
         };
         let params = VolatilityAwareParams {
             base_spread: 1.0,
@@ -60,9 +61,11 @@ mod tests {
         let state = SystemState::new(100.0);
         let calm_context = StrategyContext {
             estimated_volatility: 0.1,
+            ..StrategyContext::default()
         };
         let volatile_context = StrategyContext {
             estimated_volatility: 0.5,
+            ..StrategyContext::default()
         };
         let params = VolatilityAwareParams {
             base_spread: 1.0,
@@ -84,6 +87,7 @@ mod tests {
         state.inventory = 10.0;
         let context = StrategyContext {
             estimated_volatility: 0.0,
+            ..StrategyContext::default()
         };
         let params = VolatilityAwareParams {
             base_spread: 1.0,

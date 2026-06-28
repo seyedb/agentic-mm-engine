@@ -1,0 +1,48 @@
+{
+  "name": "baseline_regime_adaptive_volatility_aware",
+  "simulation": {
+    "steps": 10000,
+    "initial_mid_price": 100.0,
+    "seed": 42,
+    "price_volatility": 0.1,
+    "fill_price_noise": 0.1,
+    "fill_model": {
+      "type": "distance_intensity",
+      "base_intensity": 0.12,
+      "distance_decay": 4.0,
+      "volatility_boost": 1.0
+    },
+    "regime": {
+      "low_volatility_threshold": 0.08,
+      "high_volatility_threshold": 0.18
+    },
+    "order_quantity": 1.0,
+    "fee_rate": 0.001,
+    "adverse_selection_per_fill": 0.02,
+    "volatility_window": 50
+  },
+  "seeds": [38, 39, 40, 41, 42],
+  "strategy": {
+    "type": "regime_adaptive_volatility_aware",
+    "low_vol": [
+      { "base_spread": 0.5, "volatility_coeff": 1.0, "skew_coeff": 0.05 },
+      { "base_spread": 0.8, "volatility_coeff": 1.0, "skew_coeff": 0.05 }
+    ],
+    "normal_vol": [
+      { "base_spread": 0.5, "volatility_coeff": 2.0, "skew_coeff": 0.1 },
+      { "base_spread": 0.8, "volatility_coeff": 2.0, "skew_coeff": 0.1 }
+    ],
+    "high_vol": [
+      { "base_spread": 0.3, "volatility_coeff": 2.0, "skew_coeff": 0.1 },
+      { "base_spread": 0.5, "volatility_coeff": 1.0, "skew_coeff": 0.1 },
+      { "base_spread": 0.8, "volatility_coeff": 3.0, "skew_coeff": 0.1 }
+    ]
+  },
+  "scoring": {
+    "drawdown_weight": 2.0,
+    "inventory_weight": 1.0,
+    "min_fills": 50,
+    "missing_fill_penalty": 0.25,
+    "stability_weight": 0.25
+  }
+}

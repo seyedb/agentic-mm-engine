@@ -3,11 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
 use crate::engine::metrics::SimulationMetrics;
-use crate::engine::simulation::SimulationConfig;
+use crate::engine::simulation::{MarketRegime, SimulationConfig};
 use crate::experiment::{Experiment, ExperimentReport};
 use crate::strategy::QuoteStrategy;
 use crate::strategy::inventory_risk::InventoryRiskParams;
 use crate::strategy::market_maker::StrategyParams;
+use crate::strategy::regime_adaptive::RegimeAdaptiveVolatilityAwareParams;
 use crate::strategy::volatility_aware::VolatilityAwareParams;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +42,12 @@ pub enum StrategySweepConfig {
         volatility_coeffs: Vec<f64>,
         risk_aversions: Vec<f64>,
     },
+    #[serde(rename = "regime_adaptive_volatility_aware")]
+    RegimeAdaptiveVolatilityAware {
+        low_vol: Vec<VolatilityAwareParams>,
+        normal_vol: Vec<VolatilityAwareParams>,
+        high_vol: Vec<VolatilityAwareParams>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +62,38 @@ pub struct SweepResult {
     pub stable_score: f64,
     #[serde(skip)]
     seed_metrics: Vec<SimulationMetrics>,
+}
+
+impl SweepResult {
+    pub fn representative_spread(&self) -> f64 {
+        self.strategy
+            .spread_for_regime(self.dominant_regime())
+            .unwrap_or_else(|| self.strategy.primary_spread())
+    }
+
+    pub fn representative_volatility_coeff(&self) -> Option<f64> {
+        self.strategy
+            .volatility_coeff_for_regime(self.dominant_regime())
+            .or_else(|| self.strategy.volatility_coeff())
+    }
+
+    pub fn representative_skew_coeff(&self) -> Option<f64> {
+        self.strategy
+            .skew_coeff_for_regime(self.dominant_regime())
+            .or_else(|| self.strategy.skew_coeff())
+    }
+
+    fn dominant_regime(&self) -> MarketRegime {
+        if self.metrics.high_vol_steps >= self.metrics.normal_vol_steps
+            && self.metrics.high_vol_steps >= self.metrics.low_vol_steps
+        {
+            MarketRegime::HighVol
+        } else if self.metrics.normal_vol_steps >= self.metrics.low_vol_steps {
+            MarketRegime::NormalVol
+        } else {
+            MarketRegime::LowVol
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +112,11 @@ pub enum SweepStrategyParams {
         volatility_coeff: f64,
         risk_aversion: f64,
     },
+    RegimeAdaptiveVolatilityAware {
+        low_vol: VolatilityAwareParams,
+        normal_vol: VolatilityAwareParams,
+        high_vol: VolatilityAwareParams,
+    },
 }
 
 impl SweepStrategyParams {
@@ -82,7 +126,13 @@ impl SweepStrategyParams {
             Self::VolatilityAware { base_spread, .. } | Self::InventoryRisk { base_spread, .. } => {
                 *base_spread
             }
+            Self::RegimeAdaptiveVolatilityAware { normal_vol, .. } => normal_vol.base_spread,
         }
+    }
+
+    fn spread_for_regime(&self, regime: MarketRegime) -> Option<f64> {
+        self.params_for_regime(regime)
+            .map(|params| params.base_spread)
     }
 
     pub fn skew_coeff(&self) -> Option<f64> {
@@ -91,7 +141,13 @@ impl SweepStrategyParams {
                 Some(*skew_coeff)
             }
             Self::InventoryRisk { .. } => None,
+            Self::RegimeAdaptiveVolatilityAware { normal_vol, .. } => Some(normal_vol.skew_coeff),
         }
+    }
+
+    fn skew_coeff_for_regime(&self, regime: MarketRegime) -> Option<f64> {
+        self.params_for_regime(regime)
+            .map(|params| params.skew_coeff)
     }
 
     pub fn volatility_coeff(&self) -> Option<f64> {
@@ -103,13 +159,23 @@ impl SweepStrategyParams {
             | Self::InventoryRisk {
                 volatility_coeff, ..
             } => Some(*volatility_coeff),
+            Self::RegimeAdaptiveVolatilityAware { normal_vol, .. } => {
+                Some(normal_vol.volatility_coeff)
+            }
         }
+    }
+
+    fn volatility_coeff_for_regime(&self, regime: MarketRegime) -> Option<f64> {
+        self.params_for_regime(regime)
+            .map(|params| params.volatility_coeff)
     }
 
     pub fn risk_aversion(&self) -> Option<f64> {
         match self {
             Self::InventoryRisk { risk_aversion, .. } => Some(*risk_aversion),
-            Self::FixedSpread { .. } | Self::VolatilityAware { .. } => None,
+            Self::FixedSpread { .. }
+            | Self::VolatilityAware { .. }
+            | Self::RegimeAdaptiveVolatilityAware { .. } => None,
         }
     }
 
@@ -118,6 +184,24 @@ impl SweepStrategyParams {
             Self::FixedSpread { .. } => "fixed_spread",
             Self::VolatilityAware { .. } => "volatility_aware",
             Self::InventoryRisk { .. } => "inventory_risk",
+            Self::RegimeAdaptiveVolatilityAware { .. } => "regime_adaptive_volatility_aware",
+        }
+    }
+
+    fn params_for_regime(&self, regime: MarketRegime) -> Option<&VolatilityAwareParams> {
+        match self {
+            Self::RegimeAdaptiveVolatilityAware {
+                low_vol,
+                normal_vol,
+                high_vol,
+            } => match regime {
+                MarketRegime::LowVol => Some(low_vol),
+                MarketRegime::NormalVol => Some(normal_vol),
+                MarketRegime::HighVol => Some(high_vol),
+            },
+            Self::FixedSpread { .. }
+            | Self::VolatilityAware { .. }
+            | Self::InventoryRisk { .. } => None,
         }
     }
 }
@@ -206,6 +290,17 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
             volatility_coeffs,
             risk_aversions,
         ),
+        StrategySweepConfig::RegimeAdaptiveVolatilityAware {
+            low_vol,
+            normal_vol,
+            high_vol,
+        } => run_regime_adaptive_volatility_aware_sweep(
+            &config.simulation,
+            &seeds,
+            low_vol,
+            normal_vol,
+            high_vol,
+        ),
     };
 
     for result in &mut results {
@@ -236,10 +331,10 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
             index + 1,
             result.name,
             result.strategy.strategy_type(),
-            result.strategy.primary_spread(),
-            optional_f64(result.strategy.volatility_coeff()),
+            result.representative_spread(),
+            optional_f64(result.representative_volatility_coeff()),
             optional_f64(result.strategy.risk_aversion()),
-            optional_f64(result.strategy.skew_coeff()),
+            optional_f64(result.representative_skew_coeff()),
             result.runs,
             result.score,
             result.stability.score_std,
@@ -476,6 +571,53 @@ fn run_inventory_risk_sweep(
                     base_spread: *base_spread,
                     volatility_coeff: *volatility_coeff,
                     risk_aversion: *risk_aversion,
+                };
+
+                if let Some(result) = aggregate_reports(name, sweep_strategy, &reports) {
+                    results.push(result);
+                }
+            }
+        }
+    }
+
+    results
+}
+
+fn run_regime_adaptive_volatility_aware_sweep(
+    simulation: &SimulationConfig,
+    seeds: &[u64],
+    low_vol_params: &[VolatilityAwareParams],
+    normal_vol_params: &[VolatilityAwareParams],
+    high_vol_params: &[VolatilityAwareParams],
+) -> Vec<SweepResult> {
+    let mut results =
+        Vec::with_capacity(low_vol_params.len() * normal_vol_params.len() * high_vol_params.len());
+
+    for low_vol in low_vol_params {
+        for normal_vol in normal_vol_params {
+            for high_vol in high_vol_params {
+                let strategy = RegimeAdaptiveVolatilityAwareParams {
+                    low_vol: low_vol.clone(),
+                    normal_vol: normal_vol.clone(),
+                    high_vol: high_vol.clone(),
+                };
+                let name = format!(
+                    "low_{:.2}_{:.2}_{:.2}_normal_{:.2}_{:.2}_{:.2}_high_{:.2}_{:.2}_{:.2}",
+                    low_vol.base_spread,
+                    low_vol.volatility_coeff,
+                    low_vol.skew_coeff,
+                    normal_vol.base_spread,
+                    normal_vol.volatility_coeff,
+                    normal_vol.skew_coeff,
+                    high_vol.base_spread,
+                    high_vol.volatility_coeff,
+                    high_vol.skew_coeff,
+                );
+                let reports = run_seeded_reports(simulation, seeds, &name, &strategy);
+                let sweep_strategy = SweepStrategyParams::RegimeAdaptiveVolatilityAware {
+                    low_vol: low_vol.clone(),
+                    normal_vol: normal_vol.clone(),
+                    high_vol: high_vol.clone(),
                 };
 
                 if let Some(result) = aggregate_reports(name, sweep_strategy, &reports) {
@@ -745,5 +887,38 @@ mod tests {
                 .iter()
                 .all(|result| result.strategy.risk_aversion().is_some())
         );
+    }
+
+    #[test]
+    fn regime_adaptive_sweep_runs_each_parameter_combination() {
+        let params = VolatilityAwareParams {
+            base_spread: 0.5,
+            volatility_coeff: 1.0,
+            skew_coeff: 0.05,
+        };
+        let wider_params = VolatilityAwareParams {
+            base_spread: 0.8,
+            volatility_coeff: 2.0,
+            skew_coeff: 0.1,
+        };
+        let results = run_parameter_sweep(SweepConfig {
+            name: None,
+            simulation: SimulationConfig {
+                steps: 100,
+                ..SimulationConfig::default()
+            },
+            seeds: vec![1],
+            strategy: StrategySweepConfig::RegimeAdaptiveVolatilityAware {
+                low_vol: vec![params.clone(), wider_params.clone()],
+                normal_vol: vec![params.clone()],
+                high_vol: vec![wider_params],
+            },
+            scoring: ScoringConfig::default(),
+        });
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|result| {
+            result.strategy.strategy_type() == "regime_adaptive_volatility_aware"
+        }));
     }
 }
