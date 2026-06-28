@@ -7,9 +7,10 @@ Experiments are configured with JSON files in `configs/`.
 ```bash
 cargo run
 cargo run -- configs/baseline_sweep.json
+cargo run -- configs/baseline_volatility_aware_sweep.json
 cargo run -- configs/high_volatility_sweep.json
 cargo run -- configs/volatility_aware_sweep.json
-cargo run -- configs/baseline_sweep.json configs/high_volatility_sweep.json
+cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep.json configs/high_volatility_sweep.json configs/volatility_aware_sweep.json
 ```
 
 The default config is `configs/baseline_sweep.json`.
@@ -56,5 +57,6 @@ The inactivity penalty discourages strategies that avoid trading entirely.
 ## Current Regimes
 
 - `baseline_sweep.json`: lower-volatility baseline environment
+- `baseline_volatility_aware_sweep.json`: lower-volatility baseline using volatility-aware quoting
 - `high_volatility_sweep.json`: higher volatility, noisier fills, stronger adverse selection
 - `volatility_aware_sweep.json`: high-volatility environment using volatility-aware quoting

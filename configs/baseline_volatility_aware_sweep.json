@@ -1,0 +1,27 @@
+{
+  "name": "baseline_volatility_aware",
+  "simulation": {
+    "steps": 10000,
+    "initial_mid_price": 100.0,
+    "seed": 42,
+    "price_volatility": 0.1,
+    "fill_price_noise": 0.1,
+    "order_quantity": 1.0,
+    "fee_rate": 0.001,
+    "adverse_selection_per_fill": 0.02,
+    "volatility_window": 50
+  },
+  "seeds": [38, 39, 40, 41, 42],
+  "strategy": {
+    "type": "volatility_aware",
+    "base_spreads": [0.2, 0.3, 0.5],
+    "volatility_coeffs": [0.0, 1.0, 2.0, 4.0],
+    "skew_coeffs": [0.02, 0.05, 0.1, 0.2]
+  },
+  "scoring": {
+    "drawdown_weight": 2.0,
+    "inventory_weight": 1.0,
+    "min_fills": 50,
+    "missing_fill_penalty": 0.25
+  }
+}
