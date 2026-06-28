@@ -25,7 +25,7 @@ A sweep config contains:
 - strategy sweep settings
 - scoring settings
 
-The runner evaluates every spread/skew combination across the configured seeds, averages the metrics, and ranks the aggregate results.
+The runner evaluates every spread/skew combination across the configured seeds, averages the metrics, tracks stability statistics, and ranks the aggregate results.
 
 ## Output
 
@@ -40,6 +40,8 @@ The best result from each config is also written to:
 ```text
 target/reports/regime_summary.csv
 ```
+
+Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`.
 
 ## Score
 

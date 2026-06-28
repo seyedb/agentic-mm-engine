@@ -61,7 +61,7 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
     println!("name: {regime}");
     println!("config: {}", config_path.display());
     println!(
-        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
         "rank",
         "runs",
         "spread",
@@ -72,13 +72,14 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
         "avg_fee",
         "avg_adv",
         "avg_dd",
+        "pnl_sd",
         "idle",
         "score"
     );
 
     for (index, result) in results.iter().take(10).enumerate() {
         println!(
-            "{:<4} {:>5} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+            "{:<4} {:>5} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
             index + 1,
             result.runs,
             result.strategy.primary_spread(),
@@ -89,6 +90,7 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
             result.metrics.total_fees,
             result.metrics.total_adverse_selection,
             result.metrics.max_drawdown,
+            result.stability.final_pnl_std,
             result.inactivity_penalty,
             result.score,
         );
@@ -124,9 +126,12 @@ struct RegimeSummary {
     best_skew: f64,
     runs: usize,
     best_score: f64,
+    best_score_std: f64,
     best_pnl: f64,
+    best_pnl_std: f64,
     fills: f64,
     max_drawdown: f64,
+    max_drawdown_std: f64,
     max_abs_inventory: f64,
 }
 
@@ -140,9 +145,12 @@ impl RegimeSummary {
             best_skew: result.strategy.skew_coeff(),
             runs: result.runs,
             best_score: result.score,
+            best_score_std: result.stability.score_std,
             best_pnl: result.metrics.final_pnl,
+            best_pnl_std: result.stability.final_pnl_std,
             fills: result.metrics.total_fills,
             max_drawdown: result.metrics.max_drawdown,
+            max_drawdown_std: result.stability.max_drawdown_std,
             max_abs_inventory: result.metrics.max_abs_inventory,
         }
     }
@@ -150,12 +158,12 @@ impl RegimeSummary {
 
 fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
     let mut csv = String::from(
-        "regime,strategy_type,best_spread,best_volatility_coeff,best_skew,runs,best_score,avg_best_pnl,avg_fills,avg_max_drawdown,avg_max_abs_inventory\n",
+        "regime,strategy_type,best_spread,best_volatility_coeff,best_skew,runs,best_score,best_score_std,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory\n",
     );
 
     for summary in summaries {
         csv.push_str(&format!(
-            "{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
+            "{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
             summary.regime,
             summary.strategy_type,
             summary.best_spread,
@@ -163,9 +171,12 @@ fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
             summary.best_skew,
             summary.runs,
             summary.best_score,
+            summary.best_score_std,
             summary.best_pnl,
+            summary.best_pnl_std,
             summary.fills,
             summary.max_drawdown,
+            summary.max_drawdown_std,
             summary.max_abs_inventory,
         ));
     }

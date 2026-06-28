@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use std::fmt::Write;
 
+use crate::engine::metrics::SimulationMetrics;
 use crate::engine::simulation::SimulationConfig;
 use crate::experiment::{Experiment, ExperimentReport};
 use crate::strategy::QuoteStrategy;
@@ -41,8 +42,11 @@ pub struct SweepResult {
     pub strategy: SweepStrategyParams,
     pub runs: usize,
     pub metrics: SweepMetrics,
+    pub stability: SweepStability,
     pub inactivity_penalty: f64,
     pub score: f64,
+    #[serde(skip)]
+    seed_metrics: Vec<SimulationMetrics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +113,13 @@ pub struct SweepMetrics {
     pub total_adverse_selection: f64,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct SweepStability {
+    pub score_std: f64,
+    pub final_pnl_std: f64,
+    pub max_drawdown_std: f64,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ScoringConfig {
     pub drawdown_weight: f64,
@@ -152,6 +163,7 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
     for result in &mut results {
         result.inactivity_penalty = inactivity_penalty(result, scoring);
         result.score = score_result(result, scoring);
+        result.stability = stability_for_metrics(&result.seed_metrics, scoring);
     }
 
     results.sort_by(|a, b| b.score.total_cmp(&a.score));
@@ -160,9 +172,9 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
 
 pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
     let mut csv = String::from(
-        "rank,experiment,strategy_type,spread,volatility_coeff,skew,runs,score,inactivity_penalty,avg_final_pnl,avg_min_pnl,\
+        "rank,experiment,strategy_type,spread,volatility_coeff,skew,runs,score,score_std,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
          avg_max_pnl,avg_max_drawdown,avg_final_inventory,avg_max_abs_inventory,\
-         avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,\
+         max_drawdown_std,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,\
          avg_traded_notional,avg_total_fees,avg_total_adverse_selection\n",
     );
 
@@ -171,7 +183,7 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
 
         writeln!(
             csv,
-            "{},{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
+            "{},{},{},{:.6},{},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
             index + 1,
             result.name,
             result.strategy.strategy_type(),
@@ -180,13 +192,16 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
             result.strategy.skew_coeff(),
             result.runs,
             result.score,
+            result.stability.score_std,
             result.inactivity_penalty,
             metrics.final_pnl,
+            result.stability.final_pnl_std,
             metrics.min_pnl,
             metrics.max_pnl,
             metrics.max_drawdown,
             metrics.final_inventory,
             metrics.max_abs_inventory,
+            result.stability.max_drawdown_std,
             metrics.avg_abs_inventory,
             metrics.total_fills,
             metrics.buy_fills,
@@ -297,8 +312,10 @@ fn aggregate_reports(
         strategy,
         runs,
         metrics,
+        stability: SweepStability::default(),
         inactivity_penalty: 0.0,
         score: 0.0,
+        seed_metrics: reports.iter().map(|report| report.metrics).collect(),
     })
 }
 
@@ -380,6 +397,49 @@ fn inactivity_penalty(result: &SweepResult, scoring: ScoringConfig) -> f64 {
     let missing_fills = (scoring.min_fills as f64 - result.metrics.total_fills).max(0.0);
 
     missing_fills * scoring.missing_fill_penalty
+}
+
+fn stability_for_metrics(metrics: &[SimulationMetrics], scoring: ScoringConfig) -> SweepStability {
+    let scores: Vec<f64> = metrics
+        .iter()
+        .map(|metrics| score_metrics(*metrics, scoring))
+        .collect();
+    let final_pnls: Vec<f64> = metrics.iter().map(|metrics| metrics.final_pnl).collect();
+    let max_drawdowns: Vec<f64> = metrics.iter().map(|metrics| metrics.max_drawdown).collect();
+
+    SweepStability {
+        score_std: std_dev(&scores),
+        final_pnl_std: std_dev(&final_pnls),
+        max_drawdown_std: std_dev(&max_drawdowns),
+    }
+}
+
+fn score_metrics(metrics: SimulationMetrics, scoring: ScoringConfig) -> f64 {
+    let missing_fills = (scoring.min_fills as f64 - metrics.total_fills as f64).max(0.0);
+    let inactivity_penalty = missing_fills * scoring.missing_fill_penalty;
+
+    metrics.final_pnl
+        - scoring.drawdown_weight * metrics.max_drawdown
+        - scoring.inventory_weight * metrics.max_abs_inventory
+        - inactivity_penalty
+}
+
+fn std_dev(values: &[f64]) -> f64 {
+    if values.len() <= 1 {
+        return 0.0;
+    }
+
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    let variance = values
+        .iter()
+        .map(|value| {
+            let diff = value - mean;
+            diff * diff
+        })
+        .sum::<f64>()
+        / values.len() as f64;
+
+    variance.sqrt()
 }
 
 #[cfg(test)]
@@ -496,6 +556,28 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].runs, 3);
         assert!(results[0].metrics.total_fills >= 0.0);
+    }
+
+    #[test]
+    fn sweep_reports_stability_across_seeds() {
+        let results = run_parameter_sweep(SweepConfig {
+            name: None,
+            simulation: SimulationConfig {
+                steps: 100,
+                ..SimulationConfig::default()
+            },
+            seeds: vec![1, 2, 3],
+            strategy: StrategySweepConfig::FixedSpread {
+                spreads: vec![0.3],
+                skew_coeffs: vec![0.05],
+            },
+            scoring: ScoringConfig::default(),
+        });
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].stability.final_pnl_std >= 0.0);
+        assert!(results[0].stability.max_drawdown_std >= 0.0);
+        assert!(results[0].stability.score_std >= 0.0);
     }
 
     #[test]
