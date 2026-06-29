@@ -6,20 +6,11 @@ Experiments are configured with JSON files in `configs/`.
 
 ```bash
 cargo run
-cargo run -- configs/baseline_sweep.json
-cargo run -- configs/baseline_volatility_aware_sweep.json
-cargo run -- configs/baseline_inventory_risk_sweep.json
-cargo run -- configs/baseline_regime_adaptive_sweep.json
-cargo run -- configs/high_volatility_sweep.json
-cargo run -- configs/volatility_aware_sweep.json
-cargo run -- configs/high_volatility_inventory_risk_sweep.json
-cargo run -- configs/high_volatility_regime_adaptive_sweep.json
-cargo run -- configs/mixed_regime_volatility_aware_sweep.json
 cargo run -- configs/mixed_regime_adaptive_sweep.json
-cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep.json configs/baseline_inventory_risk_sweep.json configs/baseline_regime_adaptive_sweep.json configs/high_volatility_sweep.json configs/volatility_aware_sweep.json configs/high_volatility_inventory_risk_sweep.json configs/high_volatility_regime_adaptive_sweep.json configs/mixed_regime_volatility_aware_sweep.json configs/mixed_regime_adaptive_sweep.json
+cargo run -- configs/*.json
 ```
 
-The default config is `configs/baseline_sweep.json`.
+The default config is `configs/baseline_sweep.json`. Use `configs/mixed_regime_adaptive_sweep.json` as the main research run, and `configs/*.json` when you want the full comparison set.
 
 ## Sweep Config
 
@@ -56,14 +47,15 @@ target/reports/regime_summary.csv
 
 Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`, plus average regime step counts and execution attribution for low, normal, and high volatility. Step datasets include quote state, inventory, PnL, fills, fees, and adverse selection for ML/calibration work.
 
-Step datasets can be inspected with the Python research utility:
+Research utilities consume the generated step datasets:
 
 ```bash
-python3 research/analyze_steps.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
 python3 research/calibrate_fill_model.py
 python3 research/compare_calibrations.py
 python3 research/validate_fill_model.py
 ```
+
+Use `research/analyze_steps.py <path>` when you want a detailed look at one exported step dataset.
 
 The calibration utility estimates empirical fill probability and fill intensity by regime, spread bucket, and volatility bucket. It writes a JSON report to `target/research/` for later model comparison or calibration work.
 
@@ -92,15 +84,6 @@ stable_score = score - stability_weight * score_std
 
 This keeps high-PnL candidates visible while favoring parameter sets that behave more consistently across seeds.
 
-## Current Regimes
+## Configs
 
-- `baseline_sweep.json`: lower-volatility baseline environment
-- `baseline_volatility_aware_sweep.json`: lower-volatility baseline using volatility-aware quoting
-- `baseline_inventory_risk_sweep.json`: lower-volatility baseline using inventory-risk quoting
-- `baseline_regime_adaptive_sweep.json`: lower-volatility baseline using regime-conditioned volatility-aware quoting
-- `high_volatility_sweep.json`: higher volatility, noisier fills, stronger adverse selection
-- `volatility_aware_sweep.json`: high-volatility environment using volatility-aware quoting
-- `high_volatility_inventory_risk_sweep.json`: high-volatility environment using inventory-risk quoting
-- `high_volatility_regime_adaptive_sweep.json`: high-volatility environment using regime-conditioned volatility-aware quoting
-- `mixed_regime_volatility_aware_sweep.json`: scheduled low/normal/high-volatility environment using volatility-aware quoting
-- `mixed_regime_adaptive_sweep.json`: scheduled low/normal/high-volatility environment using regime-conditioned volatility-aware quoting
+See [the config guide](../configs/README.md) for the current experiment set.

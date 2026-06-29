@@ -21,25 +21,15 @@ The long-term goal is an agentic market maker: a system where a controller can o
 
 ```bash
 cargo run
-cargo run -- configs/baseline_sweep.json
-cargo run -- configs/baseline_volatility_aware_sweep.json
-cargo run -- configs/baseline_inventory_risk_sweep.json
-cargo run -- configs/baseline_regime_adaptive_sweep.json
-cargo run -- configs/high_volatility_sweep.json
-cargo run -- configs/volatility_aware_sweep.json
-cargo run -- configs/high_volatility_inventory_risk_sweep.json
-cargo run -- configs/high_volatility_regime_adaptive_sweep.json
-cargo run -- configs/mixed_regime_volatility_aware_sweep.json
 cargo run -- configs/mixed_regime_adaptive_sweep.json
-cargo run -- configs/baseline_sweep.json configs/baseline_volatility_aware_sweep.json configs/baseline_inventory_risk_sweep.json configs/baseline_regime_adaptive_sweep.json configs/high_volatility_sweep.json configs/volatility_aware_sweep.json configs/high_volatility_inventory_risk_sweep.json configs/high_volatility_regime_adaptive_sweep.json configs/mixed_regime_volatility_aware_sweep.json configs/mixed_regime_adaptive_sweep.json
+cargo run -- configs/*.json
 ```
 
 The default config is `configs/baseline_sweep.json`.
 
-Analyze an exported best-strategy step dataset:
+Run the research checks after generating reports:
 
 ```bash
-python3 research/analyze_steps.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
 python3 research/calibrate_fill_model.py
 python3 research/compare_calibrations.py
 python3 research/validate_fill_model.py
@@ -56,10 +46,10 @@ cargo clippy -- -D warnings
 
 - [Model assumptions](docs/model.md)
 - [Experiments and sweeps](docs/experiments.md)
+- [Config guide](configs/README.md)
 
 ### Roadmap
 
-- Improve the fill model with arrival probabilities and volatility-aware behavior.
-- Add multi-regime comparison reports.
+- Improve the fill model using validation warnings.
 - Add live public market data in paper-trading mode.
 - Add an agent/control layer after the core simulator is stable.
