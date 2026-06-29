@@ -629,4 +629,36 @@ mod tests {
 
         assert!(result.steps.iter().all(|step| !step.fills.is_empty()));
     }
+
+    #[test]
+    fn distance_intensity_fills_decrease_with_wider_quotes() {
+        let config = SimulationConfig {
+            steps: 5_000,
+            seed: 7,
+            price_volatility: 0.1,
+            fill_model: FillModelConfig::DistanceIntensity {
+                base_intensity: 0.2,
+                distance_decay: 4.0,
+                volatility_boost: 0.0,
+            },
+            ..SimulationConfig::default()
+        };
+        let tight_strategy = StrategyParams {
+            spread: 0.3,
+            skew_coeff: 0.0,
+        };
+        let wide_strategy = StrategyParams {
+            spread: 1.0,
+            skew_coeff: 0.0,
+        };
+
+        let tight_fills = total_fills(run_simulation(config.clone(), &tight_strategy));
+        let wide_fills = total_fills(run_simulation(config, &wide_strategy));
+
+        assert!(tight_fills > wide_fills);
+    }
+
+    fn total_fills(result: SimulationResult) -> usize {
+        result.steps.iter().map(|step| step.fills.len()).sum()
+    }
 }
