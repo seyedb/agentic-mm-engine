@@ -1,5 +1,10 @@
 use mm_engine::engine::dataset::{append_step_dataset_rows, step_dataset_header};
-use mm_engine::engine::simulation::run_simulation;
+use mm_engine::engine::metrics::SimulationMetrics;
+use mm_engine::engine::simulation::{
+    FillModelConfig, SimulationConfig, SimulationResult, run_replay_simulation, run_simulation,
+};
+use mm_engine::market::{InMemoryMarketData, market_events_from_csv};
+use mm_engine::strategy::market_maker::StrategyParams;
 use mm_engine::sweep::{SweepConfig, SweepResult, run_parameter_sweep, sweep_results_to_csv};
 use std::env;
 use std::error::Error;
@@ -42,10 +47,15 @@ const REGIME_SUMMARY_HEADER: &[&str] = &[
 ];
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "replay") {
+        return run_replay_command(&args);
+    }
+
     let output_dir = Path::new("target").join("reports");
     fs::create_dir_all(&output_dir).expect("failed to create report output directory");
 
-    let config_paths = config_paths_from_args();
+    let config_paths = config_paths_from_args(&args);
     let mut summary_rows = Vec::new();
 
     for config_path in config_paths {
@@ -82,14 +92,65 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn config_paths_from_args() -> Vec<PathBuf> {
-    let paths: Vec<PathBuf> = env::args().skip(1).map(PathBuf::from).collect();
-
-    if paths.is_empty() {
+fn config_paths_from_args(args: &[String]) -> Vec<PathBuf> {
+    if args.is_empty() {
         vec![PathBuf::from(DEFAULT_CONFIG_PATH)]
     } else {
-        paths
+        args.iter().map(PathBuf::from).collect()
     }
+}
+
+fn run_replay_command(args: &[String]) -> Result<(), Box<dyn Error>> {
+    if args.len() != 2 {
+        return Err("usage: cargo run -- replay <events.csv>".into());
+    }
+    let path = &args[1];
+
+    let events = market_events_from_csv(path)?;
+    if events.is_empty() {
+        return Err("replay CSV contains no events".into());
+    }
+
+    let steps = events.len();
+    let mut data = InMemoryMarketData::new(events);
+    let strategy = StrategyParams {
+        spread: 0.5,
+        skew_coeff: 0.05,
+    };
+    let result = run_replay_simulation(replay_config(steps), &mut data, &strategy);
+
+    print_replay_results(path, &result);
+
+    Ok(())
+}
+
+fn replay_config(steps: usize) -> SimulationConfig {
+    SimulationConfig {
+        steps,
+        fill_model: FillModelConfig::DistanceIntensity {
+            base_intensity: 0.12,
+            distance_decay: 4.0,
+            volatility_boost: 1.0,
+        },
+        ..SimulationConfig::default()
+    }
+}
+
+fn print_replay_results(path: &str, result: &SimulationResult) {
+    println!("Replay results");
+    println!("data: {path}");
+
+    let Some(metrics) = SimulationMetrics::from_result(result) else {
+        println!("steps: 0");
+        return;
+    };
+
+    println!("steps: {}", metrics.steps);
+    println!("fills: {}", metrics.total_fills);
+    println!("final_pnl: {:.2}", metrics.final_pnl);
+    println!("final_inventory: {:.2}", metrics.final_inventory);
+    println!("fees: {:.2}", metrics.total_fees);
+    println!("max_drawdown: {:.2}", metrics.max_drawdown);
 }
 
 fn load_sweep_config(path: &Path) -> Result<SweepConfig, Box<dyn Error>> {

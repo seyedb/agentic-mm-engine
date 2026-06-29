@@ -6,11 +6,12 @@ Experiments are configured with JSON files in `configs/`.
 
 ```bash
 cargo run
+cargo run -- replay data/events.csv
 cargo run -- configs/mixed_regime_adaptive_sweep.json
 cargo run -- configs/*.json
 ```
 
-The default config is `configs/baseline_sweep.json`. Use `configs/mixed_regime_adaptive_sweep.json` as the main research run, and `configs/*.json` when you want the full comparison set.
+The default config is `configs/baseline_sweep.json`. Use `configs/mixed_regime_adaptive_sweep.json` as the main research run, and `configs/*.json` when you want the full comparison set. Replay CSVs require `timestamp_ms` and `mid_price`; `bid` and `ask` are optional.
 
 ## Sweep Config
 

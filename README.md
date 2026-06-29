@@ -21,6 +21,7 @@ The long-term goal is an agentic market maker: a system where a controller can o
 
 ```bash
 cargo run
+cargo run -- replay data/events.csv
 cargo run -- configs/mixed_regime_adaptive_sweep.json
 cargo run -- configs/*.json
 ```
