@@ -7,13 +7,46 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_CONFIG_PATH: &str = "configs/baseline_sweep.json";
+const REGIME_SUMMARY_HEADER: &[&str] = &[
+    "regime",
+    "strategy_type",
+    "best_spread",
+    "best_volatility_coeff",
+    "best_risk_aversion",
+    "best_skew",
+    "runs",
+    "best_score",
+    "best_score_std",
+    "best_stable_score",
+    "avg_best_pnl",
+    "best_pnl_std",
+    "avg_fills",
+    "avg_max_drawdown",
+    "max_drawdown_std",
+    "avg_max_abs_inventory",
+    "avg_low_vol_steps",
+    "avg_normal_vol_steps",
+    "avg_high_vol_steps",
+    "avg_low_vol_fills",
+    "avg_normal_vol_fills",
+    "avg_high_vol_fills",
+    "avg_low_vol_fees",
+    "avg_normal_vol_fees",
+    "avg_high_vol_fees",
+    "avg_low_vol_adverse_selection",
+    "avg_normal_vol_adverse_selection",
+    "avg_high_vol_adverse_selection",
+    "avg_low_vol_abs_inventory",
+    "avg_normal_vol_abs_inventory",
+    "avg_high_vol_abs_inventory",
+];
 
 fn main() -> Result<(), Box<dyn Error>> {
     let output_dir = Path::new("target").join("reports");
     fs::create_dir_all(&output_dir).expect("failed to create report output directory");
 
     let config_paths = config_paths_from_args();
-    let mut summaries = Vec::new();
+    let mut summary_rows = Vec::new();
 
     for config_path in config_paths {
         let config = load_sweep_config(&config_path)?;
@@ -26,7 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         fs::write(&csv_path, sweep_results_to_csv(&results)).expect("failed to write sweep CSV");
 
         if let Some(best_result) = results.first() {
-            summaries.push(RegimeSummary::from_best_result(regime.clone(), best_result));
+            summary_rows.push(regime_summary_row(&regime, best_result));
             let step_dataset_path = output_dir.join(format!("{regime}_best_steps.csv"));
             fs::write(
                 &step_dataset_path,
@@ -41,7 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let summary_path = output_dir.join("regime_summary.csv");
-    fs::write(&summary_path, regime_summaries_to_csv(&summaries))
+    fs::write(&summary_path, regime_summaries_to_csv(&summary_rows))
         .expect("failed to write regime summary CSV");
 
     println!("wrote {}", summary_path.display());
@@ -166,123 +199,81 @@ fn file_stem(config_path: &Path) -> String {
         .to_string()
 }
 
-struct RegimeSummary {
-    regime: String,
-    strategy_type: String,
-    best_spread: f64,
-    best_volatility_coeff: Option<f64>,
-    best_risk_aversion: Option<f64>,
-    best_skew: Option<f64>,
-    runs: usize,
-    best_score: f64,
-    best_score_std: f64,
-    best_stable_score: f64,
-    best_pnl: f64,
-    best_pnl_std: f64,
-    fills: f64,
-    max_drawdown: f64,
-    max_drawdown_std: f64,
-    max_abs_inventory: f64,
-    low_vol_steps: f64,
-    normal_vol_steps: f64,
-    high_vol_steps: f64,
-    low_vol_fills: f64,
-    normal_vol_fills: f64,
-    high_vol_fills: f64,
-    low_vol_fees: f64,
-    normal_vol_fees: f64,
-    high_vol_fees: f64,
-    low_vol_adverse_selection: f64,
-    normal_vol_adverse_selection: f64,
-    high_vol_adverse_selection: f64,
-    low_vol_avg_abs_inventory: f64,
-    normal_vol_avg_abs_inventory: f64,
-    high_vol_avg_abs_inventory: f64,
+fn regime_summary_row(regime: &str, result: &SweepResult) -> Vec<String> {
+    vec![
+        regime.to_string(),
+        result.strategy.strategy_type().to_string(),
+        format_csv_f64(result.representative_spread()),
+        optional_csv_f64(result.representative_volatility_coeff()),
+        optional_csv_f64(result.strategy.risk_aversion()),
+        optional_csv_f64(result.representative_skew_coeff()),
+        result.runs.to_string(),
+        format_csv_f64(result.score),
+        format_csv_f64(result.stability.score_std),
+        format_csv_f64(result.stable_score),
+        format_csv_f64(result.metrics.final_pnl),
+        format_csv_f64(result.stability.final_pnl_std),
+        format_csv_f64(result.metrics.total_fills),
+        format_csv_f64(result.metrics.max_drawdown),
+        format_csv_f64(result.stability.max_drawdown_std),
+        format_csv_f64(result.metrics.max_abs_inventory),
+        format_csv_f64(result.metrics.low_vol_steps),
+        format_csv_f64(result.metrics.normal_vol_steps),
+        format_csv_f64(result.metrics.high_vol_steps),
+        format_csv_f64(result.metrics.low_vol_fills),
+        format_csv_f64(result.metrics.normal_vol_fills),
+        format_csv_f64(result.metrics.high_vol_fills),
+        format_csv_f64(result.metrics.low_vol_fees),
+        format_csv_f64(result.metrics.normal_vol_fees),
+        format_csv_f64(result.metrics.high_vol_fees),
+        format_csv_f64(result.metrics.low_vol_adverse_selection),
+        format_csv_f64(result.metrics.normal_vol_adverse_selection),
+        format_csv_f64(result.metrics.high_vol_adverse_selection),
+        format_csv_f64(result.metrics.low_vol_avg_abs_inventory),
+        format_csv_f64(result.metrics.normal_vol_avg_abs_inventory),
+        format_csv_f64(result.metrics.high_vol_avg_abs_inventory),
+    ]
 }
 
-impl RegimeSummary {
-    fn from_best_result(regime: String, result: &SweepResult) -> Self {
-        Self {
-            regime,
-            strategy_type: result.strategy.strategy_type().to_string(),
-            best_spread: result.representative_spread(),
-            best_volatility_coeff: result.representative_volatility_coeff(),
-            best_risk_aversion: result.strategy.risk_aversion(),
-            best_skew: result.representative_skew_coeff(),
-            runs: result.runs,
-            best_score: result.score,
-            best_score_std: result.stability.score_std,
-            best_stable_score: result.stable_score,
-            best_pnl: result.metrics.final_pnl,
-            best_pnl_std: result.stability.final_pnl_std,
-            fills: result.metrics.total_fills,
-            max_drawdown: result.metrics.max_drawdown,
-            max_drawdown_std: result.stability.max_drawdown_std,
-            max_abs_inventory: result.metrics.max_abs_inventory,
-            low_vol_steps: result.metrics.low_vol_steps,
-            normal_vol_steps: result.metrics.normal_vol_steps,
-            high_vol_steps: result.metrics.high_vol_steps,
-            low_vol_fills: result.metrics.low_vol_fills,
-            normal_vol_fills: result.metrics.normal_vol_fills,
-            high_vol_fills: result.metrics.high_vol_fills,
-            low_vol_fees: result.metrics.low_vol_fees,
-            normal_vol_fees: result.metrics.normal_vol_fees,
-            high_vol_fees: result.metrics.high_vol_fees,
-            low_vol_adverse_selection: result.metrics.low_vol_adverse_selection,
-            normal_vol_adverse_selection: result.metrics.normal_vol_adverse_selection,
-            high_vol_adverse_selection: result.metrics.high_vol_adverse_selection,
-            low_vol_avg_abs_inventory: result.metrics.low_vol_avg_abs_inventory,
-            normal_vol_avg_abs_inventory: result.metrics.normal_vol_avg_abs_inventory,
-            high_vol_avg_abs_inventory: result.metrics.high_vol_avg_abs_inventory,
-        }
-    }
-}
+fn regime_summaries_to_csv(rows: &[Vec<String>]) -> String {
+    let mut csv = REGIME_SUMMARY_HEADER.join(",");
+    csv.push('\n');
 
-fn regime_summaries_to_csv(summaries: &[RegimeSummary]) -> String {
-    let mut csv = String::from(
-        "regime,strategy_type,best_spread,best_volatility_coeff,best_risk_aversion,best_skew,runs,best_score,best_score_std,best_stable_score,avg_best_pnl,best_pnl_std,avg_fills,avg_max_drawdown,max_drawdown_std,avg_max_abs_inventory,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps,avg_low_vol_fills,avg_normal_vol_fills,avg_high_vol_fills,avg_low_vol_fees,avg_normal_vol_fees,avg_high_vol_fees,avg_low_vol_adverse_selection,avg_normal_vol_adverse_selection,avg_high_vol_adverse_selection,avg_low_vol_abs_inventory,avg_normal_vol_abs_inventory,avg_high_vol_abs_inventory\n",
-    );
-
-    for summary in summaries {
-        csv.push_str(&format!(
-            "{},{},{:.6},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}\n",
-            summary.regime,
-            summary.strategy_type,
-            summary.best_spread,
-            optional_csv_f64(summary.best_volatility_coeff),
-            optional_csv_f64(summary.best_risk_aversion),
-            optional_csv_f64(summary.best_skew),
-            summary.runs,
-            summary.best_score,
-            summary.best_score_std,
-            summary.best_stable_score,
-            summary.best_pnl,
-            summary.best_pnl_std,
-            summary.fills,
-            summary.max_drawdown,
-            summary.max_drawdown_std,
-            summary.max_abs_inventory,
-            summary.low_vol_steps,
-            summary.normal_vol_steps,
-            summary.high_vol_steps,
-            summary.low_vol_fills,
-            summary.normal_vol_fills,
-            summary.high_vol_fills,
-            summary.low_vol_fees,
-            summary.normal_vol_fees,
-            summary.high_vol_fees,
-            summary.low_vol_adverse_selection,
-            summary.normal_vol_adverse_selection,
-            summary.high_vol_adverse_selection,
-            summary.low_vol_avg_abs_inventory,
-            summary.normal_vol_avg_abs_inventory,
-            summary.high_vol_avg_abs_inventory,
-        ));
+    for row in rows {
+        debug_assert_eq!(REGIME_SUMMARY_HEADER.len(), row.len());
+        csv.push_str(&row.join(","));
+        csv.push('\n');
     }
 
     csv
 }
 
+fn format_csv_f64(value: f64) -> String {
+    format!("{value:.6}")
+}
+
 fn optional_csv_f64(value: Option<f64>) -> String {
-    value.map(|value| format!("{value:.6}")).unwrap_or_default()
+    value.map(format_csv_f64).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn regime_summary_csv_writes_header_and_row() {
+        let row = vec!["value".to_string(); REGIME_SUMMARY_HEADER.len()];
+        let csv = regime_summaries_to_csv(&[row]);
+        let mut lines = csv.lines();
+
+        assert_eq!(
+            lines.next().unwrap().split(',').count(),
+            REGIME_SUMMARY_HEADER.len()
+        );
+        assert_eq!(
+            lines.next().unwrap().split(',').count(),
+            REGIME_SUMMARY_HEADER.len()
+        );
+        assert!(lines.next().is_none());
+    }
 }
