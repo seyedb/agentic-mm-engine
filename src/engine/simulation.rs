@@ -4,7 +4,7 @@ use rand_distr::{Distribution, Normal, StandardNormal};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::state::SystemState;
-use crate::market::{Fill, Quote};
+use crate::market::{Fill, MarketDataSource, Quote};
 use crate::strategy::{QuoteStrategy, StrategyContext};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,39 +148,108 @@ where
             regime,
         };
 
-        let quote = strategy.quote(&state, &context);
-        let fills = simulate_fills(
-            quote,
-            state.mid_price,
-            context.estimated_volatility,
+        steps.push(run_strategy_step(
+            &mut state,
+            strategy,
+            &context,
             &config,
             &fill_noise,
             &mut rng,
-        );
-
-        for fill in &fills {
-            state.apply_fill(*fill);
-        }
-
-        let adverse_selection_move =
-            apply_adverse_selection(&mut state, &fills, config.adverse_selection_per_fill);
-
-        state.mark_to_market();
-
-        steps.push(SimulationStep {
-            mid_price: state.mid_price,
-            estimated_volatility: context.estimated_volatility,
-            regime,
-            quote,
-            fills,
-            adverse_selection_move,
-            inventory: state.inventory,
-            cash: state.cash,
-            pnl: state.pnl,
-        });
+        ));
     }
 
     SimulationResult { steps }
+}
+
+pub fn run_replay_simulation<S, D>(
+    config: SimulationConfig,
+    data: &mut D,
+    strategy: &S,
+) -> SimulationResult
+where
+    S: QuoteStrategy,
+    D: MarketDataSource,
+{
+    let mut state = None;
+    let mut previous_event_mid = None;
+    let mut rng = StdRng::seed_from_u64(config.seed);
+    let fill_noise = Normal::new(0.0, config.fill_price_noise).unwrap();
+    let mut volatility_estimator = RollingVolatility::new(config.volatility_window);
+    let mut steps = Vec::with_capacity(config.steps);
+
+    while steps.len() < config.steps {
+        let Some(event) = data.next_event() else {
+            break;
+        };
+
+        let state = state.get_or_insert_with(|| SystemState::new(event.mid_price));
+        if let Some(previous_mid_price) = previous_event_mid {
+            volatility_estimator.push(event.mid_price - previous_mid_price);
+        }
+        previous_event_mid = Some(event.mid_price);
+        state.mid_price = event.mid_price;
+
+        let estimated_volatility = volatility_estimator.estimate();
+        let regime = MarketRegime::classify(estimated_volatility, config.regime);
+        let context = StrategyContext {
+            estimated_volatility,
+            regime,
+        };
+
+        steps.push(run_strategy_step(
+            state,
+            strategy,
+            &context,
+            &config,
+            &fill_noise,
+            &mut rng,
+        ));
+    }
+
+    SimulationResult { steps }
+}
+
+fn run_strategy_step<S>(
+    state: &mut SystemState,
+    strategy: &S,
+    context: &StrategyContext,
+    config: &SimulationConfig,
+    fill_noise: &Normal<f64>,
+    rng: &mut StdRng,
+) -> SimulationStep
+where
+    S: QuoteStrategy,
+{
+    let quote = strategy.quote(state, context);
+    let fills = simulate_fills(
+        quote,
+        state.mid_price,
+        context.estimated_volatility,
+        config,
+        fill_noise,
+        rng,
+    );
+
+    for fill in &fills {
+        state.apply_fill(*fill);
+    }
+
+    let adverse_selection_move =
+        apply_adverse_selection(state, &fills, config.adverse_selection_per_fill);
+
+    state.mark_to_market();
+
+    SimulationStep {
+        mid_price: state.mid_price,
+        estimated_volatility: context.estimated_volatility,
+        regime: context.regime,
+        quote,
+        fills,
+        adverse_selection_move,
+        inventory: state.inventory,
+        cash: state.cash,
+        pnl: state.pnl,
+    }
 }
 
 fn price_volatility_at_step(config: &SimulationConfig, step_index: usize) -> f64 {
@@ -364,6 +433,7 @@ fn apply_adverse_selection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::market::{InMemoryMarketData, MarketEvent};
     use crate::strategy::market_maker::StrategyParams;
 
     #[test]
@@ -403,6 +473,63 @@ mod tests {
         let last_price = result.steps.last().unwrap().mid_price;
 
         assert_ne!(first_price, last_price);
+    }
+
+    #[test]
+    fn replay_simulation_uses_market_event_mid_prices() {
+        let mut data = InMemoryMarketData::new(vec![
+            MarketEvent::from_mid(1, 100.0),
+            MarketEvent::from_mid(2, 101.0),
+            MarketEvent::from_mid(3, 103.0),
+        ]);
+        let strategy = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.0,
+        };
+
+        let result = run_replay_simulation(
+            SimulationConfig {
+                steps: 10,
+                fill_model: FillModelConfig::DistanceIntensity {
+                    base_intensity: 0.0,
+                    distance_decay: 1.0,
+                    volatility_boost: 0.0,
+                },
+                ..SimulationConfig::default()
+            },
+            &mut data,
+            &strategy,
+        );
+
+        assert_eq!(result.steps.len(), 3);
+        assert_eq!(result.steps[0].mid_price, 100.0);
+        assert_eq!(result.steps[1].mid_price, 101.0);
+        assert_eq!(result.steps[2].mid_price, 103.0);
+        assert!(result.steps[2].estimated_volatility > 0.0);
+    }
+
+    #[test]
+    fn replay_simulation_respects_step_limit() {
+        let mut data = InMemoryMarketData::new(vec![
+            MarketEvent::from_mid(1, 100.0),
+            MarketEvent::from_mid(2, 101.0),
+            MarketEvent::from_mid(3, 102.0),
+        ]);
+        let strategy = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.0,
+        };
+
+        let result = run_replay_simulation(
+            SimulationConfig {
+                steps: 2,
+                ..SimulationConfig::default()
+            },
+            &mut data,
+            &strategy,
+        );
+
+        assert_eq!(result.steps.len(), 2);
     }
 
     #[test]

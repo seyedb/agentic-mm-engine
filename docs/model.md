@@ -39,7 +39,7 @@ Per-step datasets are exported for the best-ranked strategy in each sweep. These
 
 ## Market Data Boundary
 
-The market module defines a small `MarketEvent` type and `MarketDataSource` trait. The current simulator still uses its internal random walk, but this boundary gives future replay or paper-data sources a simple shape without adding exchange-specific code yet.
+The market module defines a small `MarketEvent` type and `MarketDataSource` trait. The engine can run the strategy loop over replayed market events, while the default simulator still uses its internal random walk. This keeps future paper-data sources separate from exchange-specific code.
 
 ## Strategy
 
