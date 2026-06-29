@@ -40,6 +40,7 @@ Analyze an exported best-strategy step dataset:
 
 ```bash
 python3 research/analyze_steps.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
+python3 research/calibrate_fill_model.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
 ```
 
 ### Verify
