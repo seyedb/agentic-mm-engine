@@ -6,7 +6,7 @@ Experiments are configured with JSON files in `configs/`.
 
 ```bash
 cargo run
-cargo run -- replay data/events.csv
+cargo run -- replay data/sample_events.csv
 cargo run -- configs/mixed_regime_adaptive_sweep.json
 cargo run -- configs/*.json
 ```
