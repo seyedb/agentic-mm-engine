@@ -46,6 +46,12 @@ The best result from each config is also written to:
 target/reports/regime_summary.csv
 ```
 
+Replay runs write a step dataset to:
+
+```text
+target/reports/<csv_stem>_replay_steps.csv
+```
+
 Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`, plus average regime step counts and execution attribution for low, normal, and high volatility. Step datasets include quote state, inventory, PnL, fills, fees, and adverse selection for ML/calibration work.
 
 Research utilities consume the generated step datasets:

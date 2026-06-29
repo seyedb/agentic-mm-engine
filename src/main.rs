@@ -117,9 +117,21 @@ fn run_replay_command(args: &[String]) -> Result<(), Box<dyn Error>> {
         spread: 0.5,
         skew_coeff: 0.05,
     };
-    let result = run_replay_simulation(replay_config(steps), &mut data, &strategy);
+    let config = replay_config(steps);
+    let seed = config.seed;
+    let result = run_replay_simulation(config, &mut data, &strategy);
+    let output_dir = Path::new("target").join("reports");
+    fs::create_dir_all(&output_dir).expect("failed to create report output directory");
+    let replay_name = format!("{}_replay", file_stem(Path::new(path)));
+    let step_dataset_path = output_dir.join(format!("{replay_name}_steps.csv"));
+    fs::write(
+        &step_dataset_path,
+        replay_step_dataset_to_csv(&replay_name, seed, &result),
+    )
+    .expect("failed to write replay step dataset CSV");
 
     print_replay_results(path, &result);
+    println!("wrote {}", step_dataset_path.display());
 
     Ok(())
 }
@@ -151,6 +163,12 @@ fn print_replay_results(path: &str, result: &SimulationResult) {
     println!("final_inventory: {:.2}", metrics.final_inventory);
     println!("fees: {:.2}", metrics.total_fees);
     println!("max_drawdown: {:.2}", metrics.max_drawdown);
+}
+
+fn replay_step_dataset_to_csv(name: &str, seed: u64, result: &SimulationResult) -> String {
+    let mut csv = String::from(step_dataset_header());
+    append_step_dataset_rows(&mut csv, name, "fixed_spread", seed, result);
+    csv
 }
 
 fn load_sweep_config(path: &Path) -> Result<SweepConfig, Box<dyn Error>> {
