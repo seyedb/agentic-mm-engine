@@ -86,4 +86,4 @@ This keeps high-PnL candidates visible while favoring parameter sets that behave
 
 ## Configs
 
-See [the config guide](../configs/README.md) for the current experiment set.
+See [the config guide](../configs/README.md) for the current experiment set and notes on which configs are appropriate for regime-level conclusions.
