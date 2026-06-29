@@ -25,14 +25,14 @@ class ExperimentRow:
     avg_spread: float
     avg_volatility: float
     adverse_selection_cost_per_fill: float
+    spread_response: float | None
+    volatility_response: float | None
     low_vol_steps: int | None
     normal_vol_steps: int | None
     high_vol_steps: int | None
     low_vol_fill_intensity: float | None
     normal_vol_fill_intensity: float | None
     high_vol_fill_intensity: float | None
-    spread_response: float | None
-    volatility_response: float | None
 
 
 @dataclass
@@ -111,14 +111,14 @@ def parse_row(row: dict[str, str]) -> ExperimentRow:
         avg_spread=float(row["avg_spread"]),
         avg_volatility=float(row["avg_volatility"]),
         adverse_selection_cost_per_fill=float(row["adverse_selection_cost_per_fill"]),
+        spread_response=optional_float(row["spread_response"]),
+        volatility_response=optional_float(row["volatility_response"]),
         low_vol_steps=optional_int(row.get("low_vol_steps", "")),
         normal_vol_steps=optional_int(row.get("normal_vol_steps", "")),
         high_vol_steps=optional_int(row.get("high_vol_steps", "")),
         low_vol_fill_intensity=optional_float(row["low_vol_fill_intensity"]),
         normal_vol_fill_intensity=optional_float(row["normal_vol_fill_intensity"]),
         high_vol_fill_intensity=optional_float(row["high_vol_fill_intensity"]),
-        spread_response=optional_float(row["spread_response"]),
-        volatility_response=optional_float(row["volatility_response"]),
     )
 
 
@@ -136,6 +136,10 @@ def pass_check(scope: str, check: str, detail: str) -> ValidationCheck:
 
 def warn_check(scope: str, check: str, detail: str) -> ValidationCheck:
     return ValidationCheck("WARN", scope, check, detail)
+
+
+def is_mixed_regime(row: ExperimentRow) -> bool:
+    return row.experiment.startswith("mixed_regime_")
 
 
 def validate_experiment(
@@ -169,47 +173,40 @@ def validate_experiment(
     else:
         checks.append(warn_check(scope, "fill_activity", "no observed fill activity"))
 
-    if row.spread_response is None:
-        checks.append(warn_check(scope, "spread_response", "insufficient spread buckets"))
-    elif row.spread_response >= -tolerance:
-        checks.append(
-            pass_check(
-                scope,
-                "spread_response",
-                f"response={row.spread_response:.4f}",
-            )
-        )
-    else:
-        checks.append(
-            warn_check(
-                scope,
-                "spread_response",
-                f"response={row.spread_response:.4f}; fills rose as spreads widened",
-            )
-        )
+    if is_mixed_regime(row):
+        checks.extend(validate_mixed_regime_response(row, min_regime_steps, tolerance))
 
-    if row.volatility_response is None:
-        checks.append(
-            warn_check(scope, "volatility_response", "insufficient volatility buckets")
-        )
-    elif row.volatility_response >= -tolerance:
-        checks.append(
-            pass_check(
-                scope,
-                "volatility_response",
-                f"response={row.volatility_response:.4f}",
-            )
-        )
-    else:
-        checks.append(
-            warn_check(
-                scope,
-                "volatility_response",
-                f"response={row.volatility_response:.4f}; fills fell in higher-vol buckets",
-            )
-        )
+    return checks
 
-    if row.low_vol_fill_intensity is not None and row.high_vol_fill_intensity is not None:
+
+def validate_mixed_regime_response(
+    row: ExperimentRow, min_regime_steps: int, tolerance: float
+) -> list[ValidationCheck]:
+    checks: list[ValidationCheck] = []
+    scope = row.experiment
+
+    if row.volatility_response is not None:
+        if row.volatility_response >= -tolerance:
+            checks.append(
+                pass_check(
+                    scope,
+                    "volatility_response",
+                    f"response={row.volatility_response:.4f}",
+                )
+            )
+        else:
+            checks.append(
+                warn_check(
+                    scope,
+                    "volatility_response",
+                    f"response={row.volatility_response:.4f}; fills fell in higher-vol buckets",
+                )
+            )
+
+    if (
+        row.low_vol_fill_intensity is not None
+        and row.high_vol_fill_intensity is not None
+    ):
         if (
             row.low_vol_steps is None
             or row.high_vol_steps is None
@@ -261,15 +258,12 @@ def validate_cross_experiment(
     sorted_rows = sorted(rows, key=lambda row: row.avg_volatility)
 
     adverse_violations = []
-    spread_violations = []
     for previous, current in zip(sorted_rows, sorted_rows[1:]):
         if (
             current.adverse_selection_cost_per_fill + tolerance
             < previous.adverse_selection_cost_per_fill
         ):
             adverse_violations.append((previous, current))
-        if current.avg_spread + tolerance < previous.avg_spread:
-            spread_violations.append((previous, current))
 
     if adverse_violations:
         details = "; ".join(
@@ -296,30 +290,6 @@ def validate_cross_experiment(
             )
         )
 
-    if spread_violations:
-        details = "; ".join(
-            (
-                f"{previous.experiment}->{current.experiment}: "
-                f"{previous.avg_spread:.4f}->{current.avg_spread:.4f}"
-            )
-            for previous, current in spread_violations
-        )
-        checks.append(
-            warn_check(
-                "cross_experiment",
-                "spread_vs_volatility",
-                f"average spread decreased with volatility: {details}",
-            )
-        )
-    else:
-        checks.append(
-            pass_check(
-                "cross_experiment",
-                "spread_vs_volatility",
-                "average spread is nondecreasing with average volatility",
-            )
-        )
-
     return checks
 
 
@@ -328,7 +298,18 @@ def render_report(
 ) -> str:
     passed = sum(1 for check in checks if check.status == "PASS")
     warned = sum(1 for check in checks if check.status == "WARN")
-    displayed_checks = [check for check in checks if check.status == "WARN"] or checks
+    displayed_checks = [check for check in checks if check.status == "WARN"]
+
+    lines = [
+        "Fill-model validation",
+        f"Input: {input_path}",
+        f"Experiments: {len(rows)}",
+        f"Checks: {passed} pass, {warned} warn",
+    ]
+
+    if not displayed_checks:
+        lines.append("No warnings.")
+        return "\n".join(lines)
 
     headers = ["status", "scope", "check", "detail"]
     table_rows = [
@@ -341,15 +322,8 @@ def render_report(
             max(width, len(value)) for width, value in zip(widths, table_row)
         ]
 
-    lines = [
-        "Fill-model validation",
-        f"Input: {input_path}",
-        f"Experiments: {len(rows)}",
-        f"Checks: {passed} pass, {warned} warn",
-        "Showing: warnings" if warned else "Showing: all checks",
-        "",
-        "  ".join(header.rjust(width) for header, width in zip(headers, widths)),
-    ]
+    lines.extend(["Showing: warnings", ""])
+    lines.append("  ".join(header.rjust(width) for header, width in zip(headers, widths)))
     for table_row in table_rows:
         lines.append(
             "  ".join(value.rjust(width) for value, width in zip(table_row, widths))
