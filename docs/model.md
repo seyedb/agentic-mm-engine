@@ -41,6 +41,8 @@ Per-step datasets are exported for the best-ranked strategy in each sweep. These
 
 The market module defines a small `MarketEvent` type and `MarketDataSource` trait. The engine can run the strategy loop over replayed market events, while the default simulator still uses its internal random walk. This keeps future paper-data sources separate from exchange-specific code.
 
+Replay events can be loaded from simple CSV files with `timestamp_ms` and `mid_price` columns. `bid` and `ask` columns are optional.
+
 ## Strategy
 
 The current baseline strategy is an inventory-skewed market maker:

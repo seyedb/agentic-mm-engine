@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{Error, ErrorKind, Result};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MarketEvent {
@@ -45,6 +48,10 @@ impl InMemoryMarketData {
             next_index: 0,
         }
     }
+
+    pub fn from_csv(path: impl AsRef<Path>) -> Result<Self> {
+        market_events_from_csv(path).map(Self::new)
+    }
 }
 
 impl MarketDataSource for InMemoryMarketData {
@@ -57,6 +64,91 @@ impl MarketDataSource for InMemoryMarketData {
         self.next_index += 1;
         Some(event)
     }
+}
+
+pub fn market_events_from_csv(path: impl AsRef<Path>) -> Result<Vec<MarketEvent>> {
+    let contents = fs::read_to_string(path)?;
+    let mut lines = contents.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| invalid_data("market data CSV is empty"))?;
+    let columns: Vec<&str> = header.split(',').map(str::trim).collect();
+
+    let timestamp_index = required_column(&columns, "timestamp_ms")?;
+    let mid_index = required_column(&columns, "mid_price")?;
+    let bid_index = optional_column(&columns, "bid");
+    let ask_index = optional_column(&columns, "ask");
+    let mut events = Vec::new();
+
+    for (line_index, line) in lines.enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let row_number = line_index + 2;
+        let values: Vec<&str> = line.split(',').map(str::trim).collect();
+        let timestamp_ms = parse_required_u64(&values, timestamp_index, row_number)?;
+        let mid_price = parse_required_f64(&values, mid_index, row_number)?;
+        let bid = parse_optional_f64(&values, bid_index, row_number)?;
+        let ask = parse_optional_f64(&values, ask_index, row_number)?;
+
+        events.push(MarketEvent {
+            timestamp_ms,
+            mid_price,
+            bid,
+            ask,
+        });
+    }
+
+    Ok(events)
+}
+
+fn required_column(columns: &[&str], name: &str) -> Result<usize> {
+    optional_column(columns, name).ok_or_else(|| invalid_data(format!("missing column '{name}'")))
+}
+
+fn optional_column(columns: &[&str], name: &str) -> Option<usize> {
+    columns.iter().position(|column| *column == name)
+}
+
+fn parse_required_u64(values: &[&str], index: usize, row_number: usize) -> Result<u64> {
+    values
+        .get(index)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| invalid_data(format!("missing timestamp_ms at row {row_number}")))?
+        .parse()
+        .map_err(|_| invalid_data(format!("invalid timestamp_ms at row {row_number}")))
+}
+
+fn parse_required_f64(values: &[&str], index: usize, row_number: usize) -> Result<f64> {
+    values
+        .get(index)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| invalid_data(format!("missing mid_price at row {row_number}")))?
+        .parse()
+        .map_err(|_| invalid_data(format!("invalid mid_price at row {row_number}")))
+}
+
+fn parse_optional_f64(
+    values: &[&str],
+    index: Option<usize>,
+    row_number: usize,
+) -> Result<Option<f64>> {
+    let Some(index) = index else {
+        return Ok(None);
+    };
+    let Some(value) = values.get(index).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    value
+        .parse()
+        .map(Some)
+        .map_err(|_| invalid_data(format!("invalid optional price at row {row_number}")))
+}
+
+fn invalid_data(message: impl Into<String>) -> Error {
+    Error::new(ErrorKind::InvalidData, message.into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -112,6 +204,7 @@ impl Fill {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn quoted_market_event_sets_mid_price() {
@@ -133,5 +226,47 @@ mod tests {
         assert_eq!(source.next_event().unwrap().mid_price, 100.0);
         assert_eq!(source.next_event().unwrap().mid_price, 101.0);
         assert_eq!(source.next_event(), None);
+    }
+
+    #[test]
+    fn market_events_load_from_csv() {
+        let path = temp_csv_path("market_events_load_from_csv");
+        fs::write(
+            &path,
+            "timestamp_ms,mid_price,bid,ask\n1,100.0,99.9,100.1\n2,101.0,,\n",
+        )
+        .unwrap();
+
+        let events = market_events_from_csv(&path).unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].timestamp_ms, 1);
+        assert_eq!(events[0].mid_price, 100.0);
+        assert_eq!(events[0].bid, Some(99.9));
+        assert_eq!(events[0].ask, Some(100.1));
+        assert_eq!(events[1].bid, None);
+        assert_eq!(events[1].ask, None);
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn market_events_require_mid_price_column() {
+        let path = temp_csv_path("market_events_require_mid_price_column");
+        fs::write(&path, "timestamp_ms,bid,ask\n1,99.9,100.1\n").unwrap();
+
+        let error = market_events_from_csv(&path).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+
+        fs::remove_file(path).unwrap();
+    }
+
+    fn temp_csv_path(test_name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("mm_engine_{test_name}_{nanos}.csv"))
     }
 }
