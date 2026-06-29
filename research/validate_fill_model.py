@@ -12,6 +12,7 @@ from pathlib import Path
 
 DEFAULT_INPUT = Path("target/research/fill_calibration_comparison.csv")
 DEFAULT_OUTPUT = Path("target/research/fill_model_validation.txt")
+MAX_DETAIL_LENGTH = 140
 
 
 @dataclass
@@ -322,13 +323,17 @@ def validate_cross_experiment(
     return checks
 
 
-def render_report(input_path: Path, rows: list[ExperimentRow], checks: list[ValidationCheck]) -> str:
+def render_report(
+    input_path: Path, rows: list[ExperimentRow], checks: list[ValidationCheck]
+) -> str:
     passed = sum(1 for check in checks if check.status == "PASS")
     warned = sum(1 for check in checks if check.status == "WARN")
+    displayed_checks = [check for check in checks if check.status == "WARN"] or checks
 
     headers = ["status", "scope", "check", "detail"]
     table_rows = [
-        [check.status, check.scope, check.check, check.detail] for check in checks
+        [check.status, check.scope, check.check, shorten(check.detail)]
+        for check in displayed_checks
     ]
     widths = [len(header) for header in headers]
     for table_row in table_rows:
@@ -341,6 +346,7 @@ def render_report(input_path: Path, rows: list[ExperimentRow], checks: list[Vali
         f"Input: {input_path}",
         f"Experiments: {len(rows)}",
         f"Checks: {passed} pass, {warned} warn",
+        "Showing: warnings" if warned else "Showing: all checks",
         "",
         "  ".join(header.rjust(width) for header, width in zip(headers, widths)),
     ]
@@ -349,6 +355,12 @@ def render_report(input_path: Path, rows: list[ExperimentRow], checks: list[Vali
             "  ".join(value.rjust(width) for value, width in zip(table_row, widths))
         )
     return "\n".join(lines)
+
+
+def shorten(value: str) -> str:
+    if len(value) <= MAX_DETAIL_LENGTH:
+        return value
+    return value[: MAX_DETAIL_LENGTH - 3] + "..."
 
 
 def main() -> int:

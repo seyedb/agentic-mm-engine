@@ -60,7 +60,7 @@ Step datasets can be inspected with the Python research utility:
 
 ```bash
 python3 research/analyze_steps.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
-python3 research/calibrate_fill_model.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
+python3 research/calibrate_fill_model.py
 python3 research/compare_calibrations.py
 python3 research/validate_fill_model.py
 ```

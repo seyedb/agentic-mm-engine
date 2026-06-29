@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import glob
 import json
 import math
 import sys
@@ -25,6 +26,8 @@ REQUIRED_COLUMNS = {
 }
 
 REGIME_ORDER = ["LowVol", "NormalVol", "HighVol"]
+DEFAULT_INPUT_PATTERN = "target/reports/*_best_steps.csv"
+DEFAULT_OUTPUT_DIR = Path("target/research")
 
 
 @dataclass
@@ -101,13 +104,24 @@ class CalibrationStats:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Calibrate empirical fill intensity from a step dataset."
+        description="Calibrate empirical fill intensity from step datasets."
     )
-    parser.add_argument("csv_path", type=Path, help="Path to *_best_steps.csv")
+    parser.add_argument(
+        "csv_paths",
+        nargs="*",
+        type=Path,
+        help="Paths to *_best_steps.csv files. Defaults to target/reports/*_best_steps.csv.",
+    )
     parser.add_argument(
         "--output",
         type=Path,
-        help="Path for the calibration JSON report.",
+        help="Path for the calibration JSON report. Only valid with one input file.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help="Directory for calibration JSON reports.",
     )
     parser.add_argument(
         "--spread-bucket-size",
@@ -151,8 +165,14 @@ def numeric_bucket(value: float, bucket_size: float, flag_name: str) -> tuple[fl
     return lower, upper, f"{lower:.2f}-{upper:.2f}"
 
 
-def default_output_path(csv_path: Path) -> Path:
-    return Path("target/research") / f"{csv_path.stem}_fill_calibration.json"
+def discover_inputs(paths: list[Path]) -> list[Path]:
+    if paths:
+        return sorted(paths)
+    return sorted(Path(path) for path in glob.glob(DEFAULT_INPUT_PATTERN))
+
+
+def default_output_path(csv_path: Path, output_dir: Path) -> Path:
+    return output_dir / f"{csv_path.stem}_fill_calibration.json"
 
 
 def read_dataset(
@@ -287,30 +307,39 @@ def stats_row(name: str, stats: CalibrationStats) -> list[str]:
     ]
 
 
-def main() -> int:
-    args = parse_args()
-    output_path = args.output or default_output_path(args.csv_path)
+def calibrate_dataset(
+    csv_path: Path,
+    output_path: Path,
+    spread_bucket_size: float,
+    volatility_bucket_size: float,
+) -> tuple[CalibrationStats, dict, dict, dict, set[str]]:
+    overall, by_regime, by_spread, by_volatility, seeds = read_dataset(
+        csv_path, spread_bucket_size, volatility_bucket_size
+    )
+    report = build_report(
+        csv_path,
+        spread_bucket_size,
+        volatility_bucket_size,
+        overall,
+        by_regime,
+        by_spread,
+        by_volatility,
+        seeds,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(report, indent=2) + "\n")
+    return overall, by_regime, by_spread, by_volatility, seeds
 
-    try:
-        overall, by_regime, by_spread, by_volatility, seeds = read_dataset(
-            args.csv_path, args.spread_bucket_size, args.volatility_bucket_size
-        )
-        report = build_report(
-            args.csv_path,
-            args.spread_bucket_size,
-            args.volatility_bucket_size,
-            overall,
-            by_regime,
-            by_spread,
-            by_volatility,
-            seeds,
-        )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(report, indent=2) + "\n")
-    except (OSError, ValueError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
 
+def render_detailed_report(
+    csv_path: Path,
+    output_path: Path,
+    overall: CalibrationStats,
+    by_regime: dict[str, CalibrationStats],
+    by_spread: dict[tuple[float, float, str], CalibrationStats],
+    by_volatility: dict[tuple[float, float, str], CalibrationStats],
+    seeds: set[str],
+) -> str:
     headers = [
         "bucket",
         "steps",
@@ -323,22 +352,20 @@ def main() -> int:
         "adv_per_fill",
     ]
 
-    print(f"Dataset: {args.csv_path}")
-    print(f"Calibration JSON: {output_path}")
-    print(f"Rows: {overall.steps}")
-    print(f"Seeds: {len(seeds)}")
-    print()
-    print(render_table("Overall", headers, [stats_row("all", overall)]))
-    print()
-    print(
+    sections = [
+        f"Dataset: {csv_path}",
+        f"Calibration JSON: {output_path}",
+        f"Rows: {overall.steps}",
+        f"Seeds: {len(seeds)}",
+        "",
+        render_table("Overall", headers, [stats_row("all", overall)]),
+        "",
         render_table(
             "By regime",
             headers,
             [stats_row(regime, stats) for regime, stats in ordered_regimes(by_regime)],
-        )
-    )
-    print()
-    print(
+        ),
+        "",
         render_table(
             "By spread bucket",
             headers,
@@ -346,10 +373,8 @@ def main() -> int:
                 stats_row(label, stats)
                 for _lower, _upper, label, stats in ordered_buckets(by_spread)
             ],
-        )
-    )
-    print()
-    print(
+        ),
+        "",
         render_table(
             "By volatility bucket",
             headers,
@@ -357,8 +382,86 @@ def main() -> int:
                 stats_row(label, stats)
                 for _lower, _upper, label, stats in ordered_buckets(by_volatility)
             ],
+        ),
+    ]
+    return "\n".join(sections)
+
+
+def render_batch_summary(rows: list[list[str]]) -> str:
+    headers = [
+        "dataset",
+        "rows",
+        "seeds",
+        "fill_prob",
+        "fill_int",
+        "avg_spread",
+        "avg_vol",
+        "adv_per_fill",
+    ]
+    return render_table("Calibration summary", headers, rows)
+
+
+def main() -> int:
+    args = parse_args()
+    csv_paths = discover_inputs(args.csv_paths)
+
+    if not csv_paths:
+        print(
+            f"error: no step datasets found for {DEFAULT_INPUT_PATTERN}",
+            file=sys.stderr,
         )
-    )
+        return 1
+
+    if args.output is not None and len(csv_paths) != 1:
+        print("error: --output can only be used with one input file", file=sys.stderr)
+        return 1
+
+    summary_rows: list[list[str]] = []
+
+    try:
+        for csv_path in csv_paths:
+            output_path = args.output or default_output_path(csv_path, args.output_dir)
+            overall, by_regime, by_spread, by_volatility, seeds = calibrate_dataset(
+                csv_path,
+                output_path,
+                args.spread_bucket_size,
+                args.volatility_bucket_size,
+            )
+
+            if len(csv_paths) == 1:
+                print(
+                    render_detailed_report(
+                        csv_path,
+                        output_path,
+                        overall,
+                        by_regime,
+                        by_spread,
+                        by_volatility,
+                        seeds,
+                    )
+                )
+            else:
+                summary_rows.append(
+                    [
+                        csv_path.stem,
+                        str(overall.steps),
+                        str(len(seeds)),
+                        format_number(overall.fill_probability),
+                        format_number(overall.fill_intensity),
+                        format_number(overall.avg_spread),
+                        format_number(overall.avg_estimated_volatility),
+                        format_number(overall.adverse_selection_cost_per_fill),
+                    ]
+                )
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if len(csv_paths) > 1:
+        print(render_batch_summary(summary_rows))
+        print()
+        print(f"Calibration JSON directory: {args.output_dir}")
+
     return 0
 
 
