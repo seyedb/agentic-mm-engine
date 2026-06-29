@@ -37,6 +37,10 @@ Regime-level execution attribution includes fills, fees, adverse selection, and 
 
 Per-step datasets are exported for the best-ranked strategy in each sweep. These datasets are intended as the bridge to later calibration and ML workflows without moving the simulator out of Rust.
 
+## Market Data Boundary
+
+The market module defines a small `MarketEvent` type and `MarketDataSource` trait. The current simulator still uses its internal random walk, but this boundary gives future replay or paper-data sources a simple shape without adding exchange-specific code yet.
+
 ## Strategy
 
 The current baseline strategy is an inventory-skewed market maker:
