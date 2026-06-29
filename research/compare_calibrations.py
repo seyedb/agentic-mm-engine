@@ -28,6 +28,9 @@ class ComparisonRow:
     avg_spread: float
     avg_volatility: float
     adverse_selection_cost_per_fill: float
+    low_vol_steps: int | None
+    normal_vol_steps: int | None
+    high_vol_steps: int | None
     low_vol_fill_intensity: float | None
     normal_vol_fill_intensity: float | None
     high_vol_fill_intensity: float | None
@@ -46,6 +49,9 @@ class ComparisonRow:
             "adverse_selection_cost_per_fill": format_float(
                 self.adverse_selection_cost_per_fill
             ),
+            "low_vol_steps": format_optional_int(self.low_vol_steps),
+            "normal_vol_steps": format_optional_int(self.normal_vol_steps),
+            "high_vol_steps": format_optional_int(self.high_vol_steps),
             "low_vol_fill_intensity": format_optional(self.low_vol_fill_intensity),
             "normal_vol_fill_intensity": format_optional(
                 self.normal_vol_fill_intensity
@@ -118,15 +124,23 @@ def number(value: Any, field: str) -> float:
     return float(value)
 
 
-def optional_regime_fill_intensity(report: dict[str, Any], regime: str) -> float | None:
+def optional_regime_metric(
+    report: dict[str, Any], regime: str, metric: str
+) -> float | int | None:
     by_regime = report.get("by_regime", {})
     if not isinstance(by_regime, dict) or regime not in by_regime:
         return None
     regime_stats = by_regime[regime]
     if not isinstance(regime_stats, dict):
         return None
-    value = regime_stats.get("fill_intensity")
-    return number(value, f"by_regime.{regime}.fill_intensity")
+    value = regime_stats.get(metric)
+    if value is None:
+        return None
+    if metric == "steps":
+        if not isinstance(value, int):
+            raise ValueError(f"field 'by_regime.{regime}.{metric}' must be an integer")
+        return value
+    return number(value, f"by_regime.{regime}.{metric}")
 
 
 def bucket_response(
@@ -181,14 +195,31 @@ def comparison_row(path: Path, min_bucket_steps: int) -> ComparisonRow:
             overall.get("adverse_selection_cost_per_fill"),
             "overall.adverse_selection_cost_per_fill",
         ),
-        low_vol_fill_intensity=optional_regime_fill_intensity(report, "LowVol"),
-        normal_vol_fill_intensity=optional_regime_fill_intensity(report, "NormalVol"),
-        high_vol_fill_intensity=optional_regime_fill_intensity(report, "HighVol"),
+        low_vol_steps=optional_int_metric(report, "LowVol", "steps"),
+        normal_vol_steps=optional_int_metric(report, "NormalVol", "steps"),
+        high_vol_steps=optional_int_metric(report, "HighVol", "steps"),
+        low_vol_fill_intensity=optional_float_metric(report, "LowVol", "fill_intensity"),
+        normal_vol_fill_intensity=optional_float_metric(
+            report, "NormalVol", "fill_intensity"
+        ),
+        high_vol_fill_intensity=optional_float_metric(
+            report, "HighVol", "fill_intensity"
+        ),
         spread_response=spread_response(report, min_bucket_steps),
         volatility_response=bucket_response(
             report, "by_volatility_bucket", min_bucket_steps
         ),
     )
+
+
+def optional_int_metric(report: dict[str, Any], regime: str, metric: str) -> int | None:
+    value = optional_regime_metric(report, regime, metric)
+    return None if value is None else int(value)
+
+
+def optional_float_metric(report: dict[str, Any], regime: str, metric: str) -> float | None:
+    value = optional_regime_metric(report, regime, metric)
+    return None if value is None else float(value)
 
 
 def format_float(value: float) -> str:
@@ -197,6 +228,10 @@ def format_float(value: float) -> str:
 
 def format_optional(value: float | None) -> str:
     return "" if value is None else format_float(value)
+
+
+def format_optional_int(value: int | None) -> str:
+    return "" if value is None else str(value)
 
 
 def render_table(rows: list[ComparisonRow]) -> str:

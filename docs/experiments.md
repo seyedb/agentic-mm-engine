@@ -62,11 +62,14 @@ Step datasets can be inspected with the Python research utility:
 python3 research/analyze_steps.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
 python3 research/calibrate_fill_model.py target/reports/mixed_regime_adaptive_volatility_aware_best_steps.csv
 python3 research/compare_calibrations.py
+python3 research/validate_fill_model.py
 ```
 
 The calibration utility estimates empirical fill probability and fill intensity by regime, spread bucket, and volatility bucket. It writes a JSON report to `target/research/` for later model comparison or calibration work.
 
 The comparison utility reads calibration reports and writes a compact cross-experiment CSV summary to `target/research/fill_calibration_comparison.csv`.
+
+The validation utility reads that comparison CSV and writes a pass/warn model-behavior report to `target/research/fill_model_validation.txt`.
 
 ## Score
 
