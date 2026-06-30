@@ -17,7 +17,7 @@ Recent public Kraken OHLC data can be fetched into the same replay format:
 
 ```bash
 python3 research/fetch_public_events.py --pair SOLUSD --bars 120 --out data/kraken_solusd_events.csv
-cargo run -- replay data/kraken_solusd_events.csv
+cargo run -- replay data/kraken_solusd_events.csv --spread 0.5 --skew 0.05 --quantity 0.1 --fee-rate 0.001
 ```
 
 The fetch script uses candle closes as a mid-price proxy. That is enough to test the replay pipeline with public data, but it is not a substitute for order book replay.

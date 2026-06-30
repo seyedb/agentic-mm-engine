@@ -101,12 +101,9 @@ fn config_paths_from_args(args: &[String]) -> Vec<PathBuf> {
 }
 
 fn run_replay_command(args: &[String]) -> Result<(), Box<dyn Error>> {
-    if args.len() != 2 {
-        return Err("usage: cargo run -- replay <events.csv>".into());
-    }
-    let path = &args[1];
+    let options = ReplayOptions::parse(args)?;
 
-    let events = market_events_from_csv(path)?;
+    let events = market_events_from_csv(&options.path)?;
     if events.is_empty() {
         return Err("replay CSV contains no events".into());
     }
@@ -114,15 +111,15 @@ fn run_replay_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     let steps = events.len();
     let mut data = InMemoryMarketData::new(events);
     let strategy = StrategyParams {
-        spread: 0.5,
-        skew_coeff: 0.05,
+        spread: options.spread,
+        skew_coeff: options.skew,
     };
-    let config = replay_config(steps);
+    let config = replay_config(steps, &options);
     let seed = config.seed;
     let result = run_replay_simulation(config, &mut data, &strategy);
     let output_dir = Path::new("target").join("reports");
     fs::create_dir_all(&output_dir).expect("failed to create report output directory");
-    let replay_name = format!("{}_replay", file_stem(Path::new(path)));
+    let replay_name = format!("{}_replay", file_stem(Path::new(&options.path)));
     let step_dataset_path = output_dir.join(format!("{replay_name}_steps.csv"));
     fs::write(
         &step_dataset_path,
@@ -130,15 +127,100 @@ fn run_replay_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     )
     .expect("failed to write replay step dataset CSV");
 
-    print_replay_results(path, &result);
+    print_replay_results(&options, &result);
     println!("wrote {}", step_dataset_path.display());
 
     Ok(())
 }
 
-fn replay_config(steps: usize) -> SimulationConfig {
+#[derive(Debug, Clone, PartialEq)]
+struct ReplayOptions {
+    path: String,
+    spread: f64,
+    skew: f64,
+    quantity: f64,
+    fee_rate: f64,
+}
+
+impl ReplayOptions {
+    fn parse(args: &[String]) -> Result<Self, String> {
+        if args.len() < 2 {
+            return Err(replay_usage());
+        }
+
+        let mut options = Self {
+            path: args[1].clone(),
+            spread: 0.5,
+            skew: 0.05,
+            quantity: SimulationConfig::default().order_quantity,
+            fee_rate: SimulationConfig::default().fee_rate,
+        };
+
+        let mut index = 2;
+        while index < args.len() {
+            let flag = args[index].as_str();
+            let value = args
+                .get(index + 1)
+                .ok_or_else(|| format!("{flag} requires a value\n\n{}", replay_usage()))?;
+
+            match flag {
+                "--spread" => options.spread = parse_positive_f64(flag, value)?,
+                "--skew" => options.skew = parse_non_negative_f64(flag, value)?,
+                "--quantity" => options.quantity = parse_positive_f64(flag, value)?,
+                "--fee-rate" => options.fee_rate = parse_non_negative_f64(flag, value)?,
+                _ => {
+                    return Err(format!(
+                        "unknown replay option: {flag}\n\n{}",
+                        replay_usage()
+                    ));
+                }
+            }
+
+            index += 2;
+        }
+
+        Ok(options)
+    }
+}
+
+fn replay_usage() -> String {
+    "usage: cargo run -- replay <events.csv> [--spread <value>] [--skew <value>] [--quantity <value>] [--fee-rate <value>]".to_string()
+}
+
+fn parse_positive_f64(name: &str, value: &str) -> Result<f64, String> {
+    let parsed = parse_finite_f64(name, value)?;
+    if parsed <= 0.0 {
+        return Err(format!("{name} must be positive"));
+    }
+
+    Ok(parsed)
+}
+
+fn parse_non_negative_f64(name: &str, value: &str) -> Result<f64, String> {
+    let parsed = parse_finite_f64(name, value)?;
+    if parsed < 0.0 {
+        return Err(format!("{name} must be non-negative"));
+    }
+
+    Ok(parsed)
+}
+
+fn parse_finite_f64(name: &str, value: &str) -> Result<f64, String> {
+    let parsed = value
+        .parse::<f64>()
+        .map_err(|_| format!("{name} must be a number"))?;
+    if !parsed.is_finite() {
+        return Err(format!("{name} must be finite"));
+    }
+
+    Ok(parsed)
+}
+
+fn replay_config(steps: usize, options: &ReplayOptions) -> SimulationConfig {
     SimulationConfig {
         steps,
+        order_quantity: options.quantity,
+        fee_rate: options.fee_rate,
         fill_model: FillModelConfig::DistanceIntensity {
             base_intensity: 0.12,
             distance_decay: 4.0,
@@ -148,9 +230,13 @@ fn replay_config(steps: usize) -> SimulationConfig {
     }
 }
 
-fn print_replay_results(path: &str, result: &SimulationResult) {
+fn print_replay_results(options: &ReplayOptions, result: &SimulationResult) {
     println!("Replay results");
-    println!("data: {path}");
+    println!("data: {}", options.path);
+    println!("spread: {:.4}", options.spread);
+    println!("skew: {:.4}", options.skew);
+    println!("quantity: {:.4}", options.quantity);
+    println!("fee_rate: {:.6}", options.fee_rate);
 
     let Some(metrics) = SimulationMetrics::from_result(result) else {
         println!("steps: 0");
@@ -338,6 +424,60 @@ fn optional_csv_f64(value: Option<f64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn replay_args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn replay_options_use_defaults() {
+        let options = ReplayOptions::parse(&replay_args(&["replay", "events.csv"])).unwrap();
+
+        assert_eq!(options.path, "events.csv");
+        assert_eq!(options.spread, 0.5);
+        assert_eq!(options.skew, 0.05);
+        assert_eq!(options.quantity, SimulationConfig::default().order_quantity);
+        assert_eq!(options.fee_rate, SimulationConfig::default().fee_rate);
+    }
+
+    #[test]
+    fn replay_options_parse_numeric_flags() {
+        let options = ReplayOptions::parse(&replay_args(&[
+            "replay",
+            "events.csv",
+            "--spread",
+            "0.25",
+            "--skew",
+            "0.02",
+            "--quantity",
+            "0.10",
+            "--fee-rate",
+            "0.0005",
+        ]))
+        .unwrap();
+
+        assert_eq!(options.spread, 0.25);
+        assert_eq!(options.skew, 0.02);
+        assert_eq!(options.quantity, 0.10);
+        assert_eq!(options.fee_rate, 0.0005);
+    }
+
+    #[test]
+    fn replay_options_reject_unknown_flags() {
+        let error = ReplayOptions::parse(&replay_args(&["replay", "events.csv", "--risk", "1.0"]))
+            .unwrap_err();
+
+        assert!(error.contains("unknown replay option"));
+    }
+
+    #[test]
+    fn replay_options_require_positive_quantity() {
+        let error =
+            ReplayOptions::parse(&replay_args(&["replay", "events.csv", "--quantity", "0.0"]))
+                .unwrap_err();
+
+        assert_eq!(error, "--quantity must be positive");
+    }
 
     #[test]
     fn regime_summary_csv_writes_header_and_row() {
