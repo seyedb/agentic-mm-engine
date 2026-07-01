@@ -56,6 +56,17 @@ Replay sweep output:
 target/reports/kraken_solusd_events_replay_sweep.csv
 ```
 
+Run the same sweep over several replay CSVs:
+
+```bash
+python3 research/run_replay_sweeps.py data/kraken_solusd_*.csv \
+  --seeds 42,43,44,45,46 \
+  --spreads 0.2,0.5,1.0 \
+  --skews 0.0,0.02,0.05 \
+  --quantities 0.05,0.1,0.2 \
+  --fee-rate 0.001
+```
+
 ## Analyze One Replay Sweep
 
 ```bash
