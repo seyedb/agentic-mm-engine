@@ -43,6 +43,15 @@ The market module defines a small `MarketEvent` type and `MarketDataSource` trai
 
 Replay events can be loaded from simple CSV files with `timestamp_ms` and `mid_price` columns. `bid` and `ask` columns are optional.
 
+When replay events include both `bid` and `ask`, fills are generated from observed quote crossing:
+
+```text
+strategy bid >= observed ask -> buy fill
+strategy ask <= observed bid -> sell fill
+```
+
+Mid-only replay data falls back to the configured stochastic fill model.
+
 ## Strategy
 
 The current baseline strategy is an inventory-skewed market maker:

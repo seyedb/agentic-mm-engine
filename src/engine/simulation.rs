@@ -4,7 +4,7 @@ use rand_distr::{Distribution, Normal, StandardNormal};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::state::SystemState;
-use crate::market::{Fill, MarketDataSource, Quote};
+use crate::market::{Fill, MarketDataSource, MarketEvent, Quote};
 use crate::strategy::{QuoteStrategy, StrategyContext};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +153,7 @@ where
             strategy,
             &context,
             &config,
+            None,
             &fill_noise,
             &mut rng,
         ));
@@ -201,6 +202,7 @@ where
             strategy,
             &context,
             &config,
+            event_quote(event),
             &fill_noise,
             &mut rng,
         ));
@@ -214,6 +216,7 @@ fn run_strategy_step<S>(
     strategy: &S,
     context: &StrategyContext,
     config: &SimulationConfig,
+    observed_quote: Option<Quote>,
     fill_noise: &Normal<f64>,
     rng: &mut StdRng,
 ) -> SimulationStep
@@ -226,6 +229,7 @@ where
         state.mid_price,
         context.estimated_volatility,
         config,
+        observed_quote,
         fill_noise,
         rng,
     );
@@ -250,6 +254,13 @@ where
         cash: state.cash,
         pnl: state.pnl,
     }
+}
+
+fn event_quote(event: MarketEvent) -> Option<Quote> {
+    Some(Quote {
+        bid: event.bid?,
+        ask: event.ask?,
+    })
 }
 
 fn price_volatility_at_step(config: &SimulationConfig, step_index: usize) -> f64 {
@@ -313,9 +324,19 @@ fn simulate_fills(
     mid_price: f64,
     estimated_volatility: f64,
     config: &SimulationConfig,
+    observed_quote: Option<Quote>,
     fill_noise: &Normal<f64>,
     rng: &mut StdRng,
 ) -> Vec<Fill> {
+    if let Some(observed_quote) = observed_quote {
+        return observed_quote_crossing_fills(
+            quote,
+            observed_quote,
+            config.order_quantity,
+            config.fee_rate,
+        );
+    }
+
     match config.fill_model {
         FillModelConfig::CrossingNoise => {
             let market_price = mid_price + fill_noise.sample(rng);
@@ -355,6 +376,27 @@ fn crossing_noise_fills(
     }
 
     if market_price >= quote.ask {
+        let fee = quote.ask * quantity * fee_rate;
+        fills.push(Fill::sell(quote.ask, quantity, fee));
+    }
+
+    fills
+}
+
+fn observed_quote_crossing_fills(
+    quote: Quote,
+    observed_quote: Quote,
+    quantity: f64,
+    fee_rate: f64,
+) -> Vec<Fill> {
+    let mut fills = Vec::with_capacity(2);
+
+    if quote.bid >= observed_quote.ask {
+        let fee = quote.bid * quantity * fee_rate;
+        fills.push(Fill::buy(quote.bid, quantity, fee));
+    }
+
+    if quote.ask <= observed_quote.bid {
         let fee = quote.ask * quantity * fee_rate;
         fills.push(Fill::sell(quote.ask, quantity, fee));
     }
@@ -530,6 +572,80 @@ mod tests {
         );
 
         assert_eq!(result.steps.len(), 2);
+    }
+
+    #[test]
+    fn replay_simulation_uses_observed_quotes_for_crossing_fills() {
+        let mut data = InMemoryMarketData::new(vec![
+            MarketEvent {
+                timestamp_ms: 1,
+                mid_price: 100.0,
+                bid: Some(100.25),
+                ask: Some(100.50),
+            },
+            MarketEvent {
+                timestamp_ms: 2,
+                mid_price: 100.0,
+                bid: Some(99.50),
+                ask: Some(99.75),
+            },
+        ]);
+        let strategy = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.0,
+        };
+
+        let result = run_replay_simulation(
+            SimulationConfig {
+                steps: 2,
+                order_quantity: 0.1,
+                fee_rate: 0.001,
+                fill_model: FillModelConfig::DistanceIntensity {
+                    base_intensity: 0.0,
+                    distance_decay: 1.0,
+                    volatility_boost: 0.0,
+                },
+                ..SimulationConfig::default()
+            },
+            &mut data,
+            &strategy,
+        );
+
+        assert_eq!(result.steps[0].fills.len(), 1);
+        assert_eq!(result.steps[0].fills[0].side, crate::market::FillSide::Sell);
+        assert_eq!(result.steps[0].fills[0].price, 100.25);
+        assert_eq!(result.steps[0].fills[0].quantity, 0.1);
+        assert!((result.steps[0].fills[0].fee - 0.010025).abs() < 1e-12);
+        assert_eq!(result.steps[1].fills.len(), 1);
+        assert_eq!(result.steps[1].fills[0].side, crate::market::FillSide::Buy);
+        assert_eq!(result.steps[1].fills[0].price, 99.75);
+        assert_eq!(result.steps[1].fills[0].quantity, 0.1);
+        assert!((result.steps[1].fills[0].fee - 0.009975).abs() < 1e-12);
+    }
+
+    #[test]
+    fn replay_simulation_falls_back_when_observed_quotes_are_missing() {
+        let mut data = InMemoryMarketData::new(vec![MarketEvent::from_mid(1, 100.0)]);
+        let strategy = StrategyParams {
+            spread: 0.5,
+            skew_coeff: 0.0,
+        };
+
+        let result = run_replay_simulation(
+            SimulationConfig {
+                steps: 1,
+                fill_model: FillModelConfig::DistanceIntensity {
+                    base_intensity: 1.0,
+                    distance_decay: 0.0,
+                    volatility_boost: 0.0,
+                },
+                ..SimulationConfig::default()
+            },
+            &mut data,
+            &strategy,
+        );
+
+        assert_eq!(result.steps[0].fills.len(), 2);
     }
 
     #[test]
