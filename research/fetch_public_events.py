@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime as dt
 import json
 import sys
 import time
@@ -48,6 +49,10 @@ def parse_args() -> argparse.Namespace:
         help="Number of recent candles to write, up to Kraken's 720-bar response limit.",
     )
     parser.add_argument(
+        "--since",
+        help="Start time as Unix seconds or an ISO UTC timestamp ending in Z. Defaults to a recent window.",
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         default=Path("data/kraken_solusd_events.csv"),
@@ -70,13 +75,15 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError(f"--bars must be between 1 and {MAX_KRAKEN_BARS}")
     if args.timeout <= 0:
         raise ValueError("--timeout must be positive")
+    if args.since is not None:
+        parse_since(args.since)
 
 
 def fetch_kraken_ohlc(
-    pair: str, interval: int, bars: int, timeout: float
+    pair: str, interval: int, bars: int, since: str | None, timeout: float
 ) -> list[tuple[int, float]]:
-    since = int(time.time()) - bars * interval * 60
-    query = urlencode({"pair": pair, "interval": interval, "since": since})
+    since_seconds = parse_since(since) if since else recent_since(interval, bars)
+    query = urlencode({"pair": pair, "interval": interval, "since": since_seconds})
     url = f"{KRAKEN_OHLC_URL}?{query}"
 
     with urlopen(url, timeout=timeout) as response:
@@ -86,10 +93,29 @@ def fetch_kraken_ohlc(
     if errors:
         raise ValueError(f"Kraken API error: {', '.join(errors)}")
 
-    return parse_kraken_ohlc(payload, bars)
+    return parse_kraken_ohlc(payload, bars, from_start=since is not None)
 
 
-def parse_kraken_ohlc(payload: dict, bars: int) -> list[tuple[int, float]]:
+def recent_since(interval: int, bars: int) -> int:
+    return int(time.time()) - bars * interval * 60
+
+
+def parse_since(value: str) -> int:
+    if value.isdecimal():
+        return int(value)
+
+    if not value.endswith("Z"):
+        raise ValueError("--since must be Unix seconds or an ISO UTC timestamp ending in Z")
+
+    try:
+        parsed = dt.datetime.fromisoformat(value[:-1]).replace(tzinfo=dt.timezone.utc)
+    except ValueError as exc:
+        raise ValueError(f"invalid --since timestamp: {value!r}") from exc
+
+    return int(parsed.timestamp())
+
+
+def parse_kraken_ohlc(payload: dict, bars: int, from_start: bool) -> list[tuple[int, float]]:
     result = payload.get("result")
     if not isinstance(result, dict):
         raise ValueError("Kraken response missing result object")
@@ -103,8 +129,9 @@ def parse_kraken_ohlc(payload: dict, bars: int) -> list[tuple[int, float]]:
     if not isinstance(series, list) or not series:
         raise ValueError("Kraken response contains no OHLC rows")
 
+    selected_rows = series[:bars] if from_start else series[-bars:]
     events = []
-    for row in series[-bars:]:
+    for row in selected_rows:
         if not isinstance(row, list) or len(row) < 5:
             raise ValueError(f"invalid OHLC row: {row!r}")
 
@@ -130,7 +157,9 @@ def main() -> int:
 
     try:
         validate_args(args)
-        events = fetch_kraken_ohlc(args.pair, args.interval, args.bars, args.timeout)
+        events = fetch_kraken_ohlc(
+            args.pair, args.interval, args.bars, args.since, args.timeout
+        )
         write_events(args.out, events)
     except (OSError, ValueError, TimeoutError) as exc:
         print(f"error: {exc}", file=sys.stderr)

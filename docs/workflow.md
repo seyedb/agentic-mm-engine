@@ -13,6 +13,17 @@ python3 research/fetch_public_events.py \
 
 The fetch script writes replay events as `timestamp_ms,mid_price`. Candle closes are used as a mid-price proxy.
 
+Use `--since` to create named replay windows:
+
+```bash
+python3 research/fetch_public_events.py \
+  --pair SOLUSD \
+  --interval 1 \
+  --bars 120 \
+  --since 2026-07-01T12:00:00Z \
+  --out data/kraken_solusd_20260701_1200.csv
+```
+
 ## Run A Replay Sweep
 
 ```bash
