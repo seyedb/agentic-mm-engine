@@ -81,6 +81,8 @@ python3 research/validate_fill_model.py
 
 Use `research/analyze_steps.py <path>` when you want a detailed look at one exported step dataset.
 
+Use `research/analyze_replay_sweep.py <path>` to summarize replay sweep sensitivity by spread, quantity, and skew.
+
 The calibration utility estimates empirical fill probability and fill intensity by regime, spread bucket, and volatility bucket. It writes a JSON report to `target/research/` for later model comparison or calibration work.
 
 The comparison utility reads calibration reports and writes a compact cross-experiment CSV summary to `target/research/fill_calibration_comparison.csv`.
