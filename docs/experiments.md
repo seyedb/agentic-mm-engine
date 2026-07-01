@@ -85,6 +85,9 @@ Use `research/analyze_steps.py <path>` when you want a detailed look at one expo
 
 Use `research/analyze_replay_sweep.py <path>` to summarize replay sweep sensitivity by spread, quantity, and skew.
 
+Use `research/compare_replay_sweeps.py <paths>` to compare best replay parameters across datasets.
+It writes `target/research/replay_sweep_best.csv` and `target/research/replay_sweep_parameters.csv`.
+
 The calibration utility estimates empirical fill probability and fill intensity by regime, spread bucket, and volatility bucket. It writes a JSON report to `target/research/` for later model comparison or calibration work.
 
 The comparison utility reads calibration reports and writes a compact cross-experiment CSV summary to `target/research/fill_calibration_comparison.csv`.
