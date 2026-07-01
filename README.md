@@ -56,6 +56,7 @@ cargo clippy -- -D warnings
 
 - [Model assumptions](docs/model.md)
 - [Experiments and sweeps](docs/experiments.md)
+- [Research workflow](docs/workflow.md)
 - [Config guide](configs/README.md)
 
 ### Development Note
