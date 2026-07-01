@@ -51,6 +51,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     if args.first().is_some_and(|arg| arg == "replay") {
         return run_replay_command(&args);
     }
+    if args.first().is_some_and(|arg| arg == "replay-sweep") {
+        return run_replay_sweep_command(&args);
+    }
 
     let output_dir = Path::new("target").join("reports");
     fs::create_dir_all(&output_dir).expect("failed to create report output directory");
@@ -254,6 +257,169 @@ fn print_replay_results(options: &ReplayOptions, result: &SimulationResult) {
 fn replay_step_dataset_to_csv(name: &str, seed: u64, result: &SimulationResult) -> String {
     let mut csv = String::from(step_dataset_header());
     append_step_dataset_rows(&mut csv, name, "fixed_spread", seed, result);
+    csv
+}
+
+fn run_replay_sweep_command(args: &[String]) -> Result<(), Box<dyn Error>> {
+    if args.len() != 2 {
+        return Err("usage: cargo run -- replay-sweep <events.csv>".into());
+    }
+
+    let path = &args[1];
+    let events = market_events_from_csv(path)?;
+    if events.is_empty() {
+        return Err("replay CSV contains no events".into());
+    }
+
+    let results = run_replay_sweep(events);
+    print_top_replay_sweep_results(path, &results);
+
+    let output_dir = Path::new("target").join("reports");
+    fs::create_dir_all(&output_dir).expect("failed to create report output directory");
+    let output_path = output_dir.join(format!("{}_replay_sweep.csv", file_stem(Path::new(path))));
+    fs::write(&output_path, replay_sweep_results_to_csv(&results))
+        .expect("failed to write replay sweep CSV");
+
+    println!("wrote {}", output_path.display());
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ReplaySweepResult {
+    spread: f64,
+    skew: f64,
+    quantity: f64,
+    fee_rate: f64,
+    metrics: SimulationMetrics,
+    inactivity_penalty: f64,
+    score: f64,
+}
+
+fn run_replay_sweep(events: Vec<mm_engine::market::MarketEvent>) -> Vec<ReplaySweepResult> {
+    let spreads = [0.2, 0.5, 1.0];
+    let skews = [0.0, 0.02, 0.05];
+    let quantities = [0.05, 0.1, 0.2];
+    let fee_rate = SimulationConfig::default().fee_rate;
+    let mut results = Vec::new();
+
+    for spread in spreads {
+        for skew in skews {
+            for quantity in quantities {
+                let options = ReplayOptions {
+                    path: "replay_sweep".to_string(),
+                    spread,
+                    skew,
+                    quantity,
+                    fee_rate,
+                };
+                let strategy = StrategyParams {
+                    spread,
+                    skew_coeff: skew,
+                };
+                let mut data = InMemoryMarketData::new(events.clone());
+                let result = run_replay_simulation(
+                    replay_config(events.len(), &options),
+                    &mut data,
+                    &strategy,
+                );
+
+                if let Some(metrics) = SimulationMetrics::from_result(&result) {
+                    let inactivity_penalty = replay_inactivity_penalty(metrics);
+                    let score = replay_score(metrics, inactivity_penalty);
+                    results.push(ReplaySweepResult {
+                        spread,
+                        skew,
+                        quantity,
+                        fee_rate,
+                        metrics,
+                        inactivity_penalty,
+                        score,
+                    });
+                }
+            }
+        }
+    }
+
+    results.sort_by(|a, b| b.score.total_cmp(&a.score));
+    results
+}
+
+fn replay_score(metrics: SimulationMetrics, inactivity_penalty: f64) -> f64 {
+    metrics.final_pnl - 2.0 * metrics.max_drawdown - metrics.max_abs_inventory - inactivity_penalty
+}
+
+fn replay_inactivity_penalty(metrics: SimulationMetrics) -> f64 {
+    let min_fills = (metrics.steps / 20).max(1);
+    let missing_fills = min_fills.saturating_sub(metrics.total_fills);
+
+    missing_fills as f64 * 0.25
+}
+
+fn print_top_replay_sweep_results(path: &str, results: &[ReplaySweepResult]) {
+    println!("Replay sweep results");
+    println!("data: {path}");
+    println!(
+        "{:<4} {:>8} {:>8} {:>8} {:>9} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "rank", "spread", "skew", "qty", "fee_rate", "pnl", "fills", "fees", "drawdown", "score"
+    );
+
+    for (index, result) in results.iter().take(10).enumerate() {
+        let metrics = result.metrics;
+        println!(
+            "{:<4} {:>8.2} {:>8.2} {:>8.2} {:>9.4} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.2}",
+            index + 1,
+            result.spread,
+            result.skew,
+            result.quantity,
+            result.fee_rate,
+            metrics.final_pnl,
+            metrics.total_fills,
+            metrics.total_fees,
+            metrics.max_drawdown,
+            result.score,
+        );
+    }
+}
+
+fn replay_sweep_results_to_csv(results: &[ReplaySweepResult]) -> String {
+    let mut csv = String::from(
+        "rank,spread,skew,quantity,fee_rate,score,inactivity_penalty,final_pnl,min_pnl,max_pnl,max_drawdown,final_inventory,max_abs_inventory,avg_abs_inventory,total_fills,buy_fills,sell_fills,traded_quantity,traded_notional,total_fees,total_adverse_selection,low_vol_steps,normal_vol_steps,high_vol_steps\n",
+    );
+
+    for (index, result) in results.iter().enumerate() {
+        let metrics = result.metrics;
+        let row = vec![
+            (index + 1).to_string(),
+            format_csv_f64(result.spread),
+            format_csv_f64(result.skew),
+            format_csv_f64(result.quantity),
+            format_csv_f64(result.fee_rate),
+            format_csv_f64(result.score),
+            format_csv_f64(result.inactivity_penalty),
+            format_csv_f64(metrics.final_pnl),
+            format_csv_f64(metrics.min_pnl),
+            format_csv_f64(metrics.max_pnl),
+            format_csv_f64(metrics.max_drawdown),
+            format_csv_f64(metrics.final_inventory),
+            format_csv_f64(metrics.max_abs_inventory),
+            format_csv_f64(metrics.avg_abs_inventory),
+            metrics.total_fills.to_string(),
+            metrics.buy_fills.to_string(),
+            metrics.sell_fills.to_string(),
+            format_csv_f64(metrics.traded_quantity),
+            format_csv_f64(metrics.traded_notional),
+            format_csv_f64(metrics.total_fees),
+            format_csv_f64(metrics.total_adverse_selection),
+            metrics.low_vol_steps.to_string(),
+            metrics.normal_vol_steps.to_string(),
+            metrics.high_vol_steps.to_string(),
+        ];
+
+        csv.push_str(&row.join(","));
+        csv.push('\n');
+    }
+
     csv
 }
 
@@ -477,6 +643,41 @@ mod tests {
                 .unwrap_err();
 
         assert_eq!(error, "--quantity must be positive");
+    }
+
+    #[test]
+    fn replay_sweep_runs_fixed_grid() {
+        let events = vec![
+            mm_engine::market::MarketEvent::from_mid(1, 100.0),
+            mm_engine::market::MarketEvent::from_mid(2, 100.1),
+            mm_engine::market::MarketEvent::from_mid(3, 100.0),
+            mm_engine::market::MarketEvent::from_mid(4, 100.2),
+        ];
+
+        let results = run_replay_sweep(events);
+
+        assert_eq!(results.len(), 27);
+        assert!(
+            results
+                .windows(2)
+                .all(|window| window[0].score >= window[1].score)
+        );
+    }
+
+    #[test]
+    fn replay_sweep_csv_writes_ranked_rows() {
+        let events = vec![
+            mm_engine::market::MarketEvent::from_mid(1, 100.0),
+            mm_engine::market::MarketEvent::from_mid(2, 100.1),
+        ];
+        let results = run_replay_sweep(events);
+        let csv = replay_sweep_results_to_csv(&results);
+        let mut lines = csv.lines();
+        let header_width = lines.next().unwrap().split(',').count();
+        let first_row: Vec<&str> = lines.next().unwrap().split(',').collect();
+
+        assert_eq!(first_row[0], "1");
+        assert_eq!(first_row.len(), header_width);
     }
 
     #[test]
