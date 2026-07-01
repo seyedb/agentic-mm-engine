@@ -13,6 +13,16 @@ python3 research/fetch_public_events.py \
 
 The fetch script writes replay events as `timestamp_ms,mid_price`. Candle closes are used as a mid-price proxy.
 
+Fetch public top-of-book snapshots when quote-crossing replay behavior is needed:
+
+```bash
+python3 research/fetch_public_quotes.py \
+  --pair SOLUSD \
+  --samples 60 \
+  --interval-seconds 5 \
+  --out data/kraken_solusd_quotes.csv
+```
+
 Use `--since` to create named replay windows:
 
 ```bash
