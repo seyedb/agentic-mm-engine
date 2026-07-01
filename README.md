@@ -58,6 +58,10 @@ cargo clippy -- -D warnings
 - [Experiments and sweeps](docs/experiments.md)
 - [Config guide](configs/README.md)
 
+### Development Note
+
+This project is developed as a learning and research effort with AI assistance for code generation, refactoring, and documentation. Design decisions, review, testing, and project direction are handled by the author.
+
 ### Roadmap
 
 - Improve the fill model using validation warnings.
