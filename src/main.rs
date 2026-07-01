@@ -288,6 +288,7 @@ fn run_replay_sweep_command(args: &[String]) -> Result<(), Box<dyn Error>> {
 #[derive(Debug, Clone, PartialEq)]
 struct ReplaySweepOptions {
     path: String,
+    seeds: Vec<u64>,
     spreads: Vec<f64>,
     skews: Vec<f64>,
     quantities: Vec<f64>,
@@ -310,6 +311,7 @@ impl ReplaySweepOptions {
                 .ok_or_else(|| format!("{flag} requires a value\n\n{}", replay_sweep_usage()))?;
 
             match flag {
+                "--seeds" => options.seeds = parse_u64_list(flag, value)?,
                 "--spreads" => options.spreads = parse_positive_f64_list(flag, value)?,
                 "--skews" => options.skews = parse_non_negative_f64_list(flag, value)?,
                 "--quantities" => options.quantities = parse_positive_f64_list(flag, value)?,
@@ -331,6 +333,7 @@ impl ReplaySweepOptions {
     fn default_for_path(path: String) -> Self {
         Self {
             path,
+            seeds: vec![SimulationConfig::default().seed],
             spreads: vec![0.2, 0.5, 1.0],
             skews: vec![0.0, 0.02, 0.05],
             quantities: vec![0.05, 0.1, 0.2],
@@ -339,12 +342,38 @@ impl ReplaySweepOptions {
     }
 
     fn run_count(&self) -> usize {
+        self.parameter_count() * self.seeds.len()
+    }
+
+    fn parameter_count(&self) -> usize {
         self.spreads.len() * self.skews.len() * self.quantities.len()
     }
 }
 
 fn replay_sweep_usage() -> String {
-    "usage: cargo run -- replay-sweep <events.csv> [--spreads <a,b,c>] [--skews <a,b,c>] [--quantities <a,b,c>] [--fee-rate <value>]".to_string()
+    "usage: cargo run -- replay-sweep <events.csv> [--seeds <a,b,c>] [--spreads <a,b,c>] [--skews <a,b,c>] [--quantities <a,b,c>] [--fee-rate <value>]".to_string()
+}
+
+fn parse_u64_list(name: &str, value: &str) -> Result<Vec<u64>, String> {
+    let values: Result<Vec<u64>, String> = value
+        .split(',')
+        .map(str::trim)
+        .map(|part| {
+            if part.is_empty() {
+                return Err(format!("{name} contains an empty value"));
+            }
+
+            part.parse::<u64>()
+                .map_err(|_| format!("{name} must contain unsigned integers"))
+        })
+        .collect();
+    let values = values?;
+
+    if values.is_empty() {
+        return Err(format!("{name} must contain at least one value"));
+    }
+
+    Ok(values)
 }
 
 fn parse_positive_f64_list(name: &str, value: &str) -> Result<Vec<f64>, String> {
@@ -386,9 +415,35 @@ struct ReplaySweepResult {
     skew: f64,
     quantity: f64,
     fee_rate: f64,
-    metrics: SimulationMetrics,
+    runs: usize,
+    metrics: ReplaySweepMetrics,
     inactivity_penalty: f64,
     score: f64,
+    score_std: f64,
+    stable_score: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ReplaySweepMetrics {
+    final_pnl: f64,
+    final_pnl_std: f64,
+    min_pnl: f64,
+    max_pnl: f64,
+    max_drawdown: f64,
+    max_drawdown_std: f64,
+    final_inventory: f64,
+    max_abs_inventory: f64,
+    avg_abs_inventory: f64,
+    total_fills: f64,
+    buy_fills: f64,
+    sell_fills: f64,
+    traded_quantity: f64,
+    traded_notional: f64,
+    total_fees: f64,
+    total_adverse_selection: f64,
+    low_vol_steps: f64,
+    normal_vol_steps: f64,
+    high_vol_steps: f64,
 }
 
 fn run_replay_sweep(
@@ -400,43 +455,113 @@ fn run_replay_sweep(
     for spread in &options.spreads {
         for skew in &options.skews {
             for quantity in &options.quantities {
-                let replay_options = ReplayOptions {
-                    path: "replay_sweep".to_string(),
-                    spread: *spread,
-                    skew: *skew,
-                    quantity: *quantity,
-                    fee_rate: options.fee_rate,
-                };
                 let strategy = StrategyParams {
                     spread: *spread,
                     skew_coeff: *skew,
                 };
-                let mut data = InMemoryMarketData::new(events.clone());
-                let result = run_replay_simulation(
-                    replay_config(events.len(), &replay_options),
-                    &mut data,
-                    &strategy,
-                );
+                let mut metrics_by_seed = Vec::new();
+                let mut scores_by_seed = Vec::new();
+                let mut inactivity_by_seed = Vec::new();
 
-                if let Some(metrics) = SimulationMetrics::from_result(&result) {
-                    let inactivity_penalty = replay_inactivity_penalty(metrics);
-                    let score = replay_score(metrics, inactivity_penalty);
+                for seed in &options.seeds {
+                    let replay_options = ReplayOptions {
+                        path: "replay_sweep".to_string(),
+                        spread: *spread,
+                        skew: *skew,
+                        quantity: *quantity,
+                        fee_rate: options.fee_rate,
+                    };
+                    let mut config = replay_config(events.len(), &replay_options);
+                    config.seed = *seed;
+                    let mut data = InMemoryMarketData::new(events.clone());
+                    let result = run_replay_simulation(config, &mut data, &strategy);
+
+                    if let Some(metrics) = SimulationMetrics::from_result(&result) {
+                        let inactivity_penalty = replay_inactivity_penalty(metrics);
+                        let score = replay_score(metrics, inactivity_penalty);
+                        metrics_by_seed.push(metrics);
+                        scores_by_seed.push(score);
+                        inactivity_by_seed.push(inactivity_penalty);
+                    }
+                }
+
+                if !metrics_by_seed.is_empty() {
+                    let score = mean(&scores_by_seed);
+                    let score_std = std_dev(&scores_by_seed);
                     results.push(ReplaySweepResult {
                         spread: *spread,
                         skew: *skew,
                         quantity: *quantity,
                         fee_rate: options.fee_rate,
-                        metrics,
-                        inactivity_penalty,
+                        runs: metrics_by_seed.len(),
+                        metrics: aggregate_replay_metrics(&metrics_by_seed),
+                        inactivity_penalty: mean(&inactivity_by_seed),
                         score,
+                        score_std,
+                        stable_score: score - 0.25 * score_std,
                     });
                 }
             }
         }
     }
 
-    results.sort_by(|a, b| b.score.total_cmp(&a.score));
+    results.sort_by(|a, b| b.stable_score.total_cmp(&a.stable_score));
     results
+}
+
+fn aggregate_replay_metrics(metrics: &[SimulationMetrics]) -> ReplaySweepMetrics {
+    let final_pnls: Vec<f64> = metrics.iter().map(|metric| metric.final_pnl).collect();
+    let max_drawdowns: Vec<f64> = metrics.iter().map(|metric| metric.max_drawdown).collect();
+
+    ReplaySweepMetrics {
+        final_pnl: mean(&final_pnls),
+        final_pnl_std: std_dev(&final_pnls),
+        min_pnl: mean_metric(metrics, |metric| metric.min_pnl),
+        max_pnl: mean_metric(metrics, |metric| metric.max_pnl),
+        max_drawdown: mean(&max_drawdowns),
+        max_drawdown_std: std_dev(&max_drawdowns),
+        final_inventory: mean_metric(metrics, |metric| metric.final_inventory),
+        max_abs_inventory: mean_metric(metrics, |metric| metric.max_abs_inventory),
+        avg_abs_inventory: mean_metric(metrics, |metric| metric.avg_abs_inventory),
+        total_fills: mean_metric(metrics, |metric| metric.total_fills as f64),
+        buy_fills: mean_metric(metrics, |metric| metric.buy_fills as f64),
+        sell_fills: mean_metric(metrics, |metric| metric.sell_fills as f64),
+        traded_quantity: mean_metric(metrics, |metric| metric.traded_quantity),
+        traded_notional: mean_metric(metrics, |metric| metric.traded_notional),
+        total_fees: mean_metric(metrics, |metric| metric.total_fees),
+        total_adverse_selection: mean_metric(metrics, |metric| metric.total_adverse_selection),
+        low_vol_steps: mean_metric(metrics, |metric| metric.low_vol_steps as f64),
+        normal_vol_steps: mean_metric(metrics, |metric| metric.normal_vol_steps as f64),
+        high_vol_steps: mean_metric(metrics, |metric| metric.high_vol_steps as f64),
+    }
+}
+
+fn mean_metric(metrics: &[SimulationMetrics], value: fn(SimulationMetrics) -> f64) -> f64 {
+    let values: Vec<f64> = metrics.iter().copied().map(value).collect();
+    mean(&values)
+}
+
+fn mean(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
+fn std_dev(values: &[f64]) -> f64 {
+    if values.len() <= 1 {
+        return 0.0;
+    }
+
+    let mean = mean(values);
+    let variance = values
+        .iter()
+        .map(|value| (value - mean).powi(2))
+        .sum::<f64>()
+        / values.len() as f64;
+
+    variance.sqrt()
 }
 
 fn replay_score(metrics: SimulationMetrics, inactivity_penalty: f64) -> f64 {
@@ -454,23 +579,37 @@ fn print_top_replay_sweep_results(options: &ReplaySweepOptions, results: &[Repla
     println!("Replay sweep results");
     println!("data: {}", options.path);
     println!(
-        "grid: spreads={} skews={} quantities={} runs={}",
+        "grid: spreads={} skews={} quantities={} seeds={} parameter_sets={} runs={}",
         options.spreads.len(),
         options.skews.len(),
         options.quantities.len(),
+        options.seeds.len(),
+        options.parameter_count(),
         options.run_count()
     );
     println!("fee_rate: {:.6}", options.fee_rate);
     println!(
-        "{:<4} {:>8} {:>8} {:>8} {:>9} {:>8} {:>8} {:>8} {:>8} {:>8}",
-        "rank", "spread", "skew", "qty", "fee_rate", "pnl", "fills", "fees", "drawdown", "score"
+        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>9} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "rank",
+        "runs",
+        "spread",
+        "skew",
+        "qty",
+        "fee_rate",
+        "avg_pnl",
+        "fills",
+        "fees",
+        "drawdown",
+        "score_sd",
+        "stable"
     );
 
     for (index, result) in results.iter().take(10).enumerate() {
         let metrics = result.metrics;
         println!(
-            "{:<4} {:>8.2} {:>8.2} {:>8.2} {:>9.4} {:>8.2} {:>8} {:>8.2} {:>8.2} {:>8.2}",
+            "{:<4} {:>5} {:>8.2} {:>8.2} {:>8.2} {:>9.4} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
             index + 1,
+            result.runs,
             result.spread,
             result.skew,
             result.quantity,
@@ -479,14 +618,15 @@ fn print_top_replay_sweep_results(options: &ReplaySweepOptions, results: &[Repla
             metrics.total_fills,
             metrics.total_fees,
             metrics.max_drawdown,
-            result.score,
+            result.score_std,
+            result.stable_score,
         );
     }
 }
 
 fn replay_sweep_results_to_csv(results: &[ReplaySweepResult]) -> String {
     let mut csv = String::from(
-        "rank,spread,skew,quantity,fee_rate,score,inactivity_penalty,final_pnl,min_pnl,max_pnl,max_drawdown,final_inventory,max_abs_inventory,avg_abs_inventory,total_fills,buy_fills,sell_fills,traded_quantity,traded_notional,total_fees,total_adverse_selection,low_vol_steps,normal_vol_steps,high_vol_steps\n",
+        "rank,spread,skew,quantity,fee_rate,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,avg_max_pnl,avg_max_drawdown,max_drawdown_std,avg_final_inventory,avg_max_abs_inventory,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,avg_traded_notional,avg_total_fees,avg_total_adverse_selection,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps\n",
     );
 
     for (index, result) in results.iter().enumerate() {
@@ -497,25 +637,30 @@ fn replay_sweep_results_to_csv(results: &[ReplaySweepResult]) -> String {
             format_csv_f64(result.skew),
             format_csv_f64(result.quantity),
             format_csv_f64(result.fee_rate),
+            result.runs.to_string(),
             format_csv_f64(result.score),
+            format_csv_f64(result.score_std),
+            format_csv_f64(result.stable_score),
             format_csv_f64(result.inactivity_penalty),
             format_csv_f64(metrics.final_pnl),
+            format_csv_f64(metrics.final_pnl_std),
             format_csv_f64(metrics.min_pnl),
             format_csv_f64(metrics.max_pnl),
             format_csv_f64(metrics.max_drawdown),
+            format_csv_f64(metrics.max_drawdown_std),
             format_csv_f64(metrics.final_inventory),
             format_csv_f64(metrics.max_abs_inventory),
             format_csv_f64(metrics.avg_abs_inventory),
-            metrics.total_fills.to_string(),
-            metrics.buy_fills.to_string(),
-            metrics.sell_fills.to_string(),
+            format_csv_f64(metrics.total_fills),
+            format_csv_f64(metrics.buy_fills),
+            format_csv_f64(metrics.sell_fills),
             format_csv_f64(metrics.traded_quantity),
             format_csv_f64(metrics.traded_notional),
             format_csv_f64(metrics.total_fees),
             format_csv_f64(metrics.total_adverse_selection),
-            metrics.low_vol_steps.to_string(),
-            metrics.normal_vol_steps.to_string(),
-            metrics.high_vol_steps.to_string(),
+            format_csv_f64(metrics.low_vol_steps),
+            format_csv_f64(metrics.normal_vol_steps),
+            format_csv_f64(metrics.high_vol_steps),
         ];
 
         csv.push_str(&row.join(","));
@@ -756,6 +901,7 @@ mod tests {
         assert_eq!(options.spreads, vec![0.2, 0.5, 1.0]);
         assert_eq!(options.skews, vec![0.0, 0.02, 0.05]);
         assert_eq!(options.quantities, vec![0.05, 0.1, 0.2]);
+        assert_eq!(options.seeds, vec![SimulationConfig::default().seed]);
         assert_eq!(options.fee_rate, SimulationConfig::default().fee_rate);
         assert_eq!(options.run_count(), 27);
     }
@@ -765,6 +911,8 @@ mod tests {
         let options = ReplaySweepOptions::parse(&replay_args(&[
             "replay-sweep",
             "events.csv",
+            "--seeds",
+            "42,43",
             "--spreads",
             "0.25,0.50",
             "--skews",
@@ -776,11 +924,26 @@ mod tests {
         ]))
         .unwrap();
 
+        assert_eq!(options.seeds, vec![42, 43]);
         assert_eq!(options.spreads, vec![0.25, 0.50]);
         assert_eq!(options.skews, vec![0.00, 0.03]);
         assert_eq!(options.quantities, vec![0.10, 0.20]);
         assert_eq!(options.fee_rate, 0.0005);
-        assert_eq!(options.run_count(), 8);
+        assert_eq!(options.parameter_count(), 8);
+        assert_eq!(options.run_count(), 16);
+    }
+
+    #[test]
+    fn replay_sweep_options_reject_invalid_seeds() {
+        let error = ReplaySweepOptions::parse(&replay_args(&[
+            "replay-sweep",
+            "events.csv",
+            "--seeds",
+            "42,nope",
+        ]))
+        .unwrap_err();
+
+        assert_eq!(error, "--seeds must contain unsigned integers");
     }
 
     #[test]
@@ -825,8 +988,30 @@ mod tests {
         assert!(
             results
                 .windows(2)
-                .all(|window| window[0].score >= window[1].score)
+                .all(|window| window[0].stable_score >= window[1].stable_score)
         );
+    }
+
+    #[test]
+    fn replay_sweep_aggregates_multiple_seeds() {
+        let events = vec![
+            mm_engine::market::MarketEvent::from_mid(1, 100.0),
+            mm_engine::market::MarketEvent::from_mid(2, 100.1),
+            mm_engine::market::MarketEvent::from_mid(3, 100.0),
+            mm_engine::market::MarketEvent::from_mid(4, 100.2),
+        ];
+        let mut options = ReplaySweepOptions::default_for_path("events.csv".to_string());
+        options.seeds = vec![42, 43, 44];
+        options.spreads = vec![0.5];
+        options.skews = vec![0.0];
+        options.quantities = vec![0.1];
+
+        let results = run_replay_sweep(events, &options);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].runs, 3);
+        assert!(results[0].score_std >= 0.0);
+        assert!(results[0].metrics.final_pnl_std >= 0.0);
     }
 
     #[test]

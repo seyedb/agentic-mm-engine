@@ -19,7 +19,7 @@ Recent public Kraken OHLC data can be fetched into the same replay format:
 ```bash
 python3 research/fetch_public_events.py --pair SOLUSD --bars 120 --out data/kraken_solusd_events.csv
 cargo run -- replay data/kraken_solusd_events.csv --spread 0.5 --skew 0.05 --quantity 0.1 --fee-rate 0.001
-cargo run -- replay-sweep data/kraken_solusd_events.csv --spreads 0.2,0.5,1.0 --skews 0.0,0.02,0.05 --quantities 0.05,0.1,0.2 --fee-rate 0.001
+cargo run -- replay-sweep data/kraken_solusd_events.csv --seeds 42,43,44,45,46 --spreads 0.2,0.5,1.0 --skews 0.0,0.02,0.05 --quantities 0.05,0.1,0.2 --fee-rate 0.001
 ```
 
 The fetch script uses candle closes as a mid-price proxy. That is enough to test the replay pipeline with public data, but it is not a substitute for order book replay.
@@ -68,6 +68,8 @@ Replay sweeps write ranked parameter results to:
 ```text
 target/reports/<csv_stem>_replay_sweep.csv
 ```
+
+Replay sweep rows are averaged across the configured seeds and ranked by stability-adjusted score.
 
 Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`, plus average regime step counts and execution attribution for low, normal, and high volatility. Step datasets include quote state, inventory, PnL, fills, fees, and adverse selection for ML/calibration work.
 
