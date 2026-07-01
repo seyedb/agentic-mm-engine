@@ -3,7 +3,7 @@ use mm_engine::engine::metrics::SimulationMetrics;
 use mm_engine::engine::simulation::{
     FillModelConfig, SimulationConfig, SimulationResult, run_replay_simulation, run_simulation,
 };
-use mm_engine::market::{InMemoryMarketData, market_events_from_csv};
+use mm_engine::market::{InMemoryMarketData, MarketEvent, market_events_from_csv};
 use mm_engine::strategy::market_maker::StrategyParams;
 use mm_engine::sweep::{SweepConfig, SweepResult, run_parameter_sweep, sweep_results_to_csv};
 use std::env;
@@ -261,28 +261,123 @@ fn replay_step_dataset_to_csv(name: &str, seed: u64, result: &SimulationResult) 
 }
 
 fn run_replay_sweep_command(args: &[String]) -> Result<(), Box<dyn Error>> {
-    if args.len() != 2 {
-        return Err("usage: cargo run -- replay-sweep <events.csv>".into());
-    }
+    let options = ReplaySweepOptions::parse(args)?;
 
-    let path = &args[1];
-    let events = market_events_from_csv(path)?;
+    let events = market_events_from_csv(&options.path)?;
     if events.is_empty() {
         return Err("replay CSV contains no events".into());
     }
 
-    let results = run_replay_sweep(events);
-    print_top_replay_sweep_results(path, &results);
+    let results = run_replay_sweep(events, &options);
+    print_top_replay_sweep_results(&options, &results);
 
     let output_dir = Path::new("target").join("reports");
     fs::create_dir_all(&output_dir).expect("failed to create report output directory");
-    let output_path = output_dir.join(format!("{}_replay_sweep.csv", file_stem(Path::new(path))));
+    let output_path = output_dir.join(format!(
+        "{}_replay_sweep.csv",
+        file_stem(Path::new(&options.path))
+    ));
     fs::write(&output_path, replay_sweep_results_to_csv(&results))
         .expect("failed to write replay sweep CSV");
 
     println!("wrote {}", output_path.display());
 
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ReplaySweepOptions {
+    path: String,
+    spreads: Vec<f64>,
+    skews: Vec<f64>,
+    quantities: Vec<f64>,
+    fee_rate: f64,
+}
+
+impl ReplaySweepOptions {
+    fn parse(args: &[String]) -> Result<Self, String> {
+        if args.len() < 2 {
+            return Err(replay_sweep_usage());
+        }
+
+        let mut options = Self::default_for_path(args[1].clone());
+
+        let mut index = 2;
+        while index < args.len() {
+            let flag = args[index].as_str();
+            let value = args
+                .get(index + 1)
+                .ok_or_else(|| format!("{flag} requires a value\n\n{}", replay_sweep_usage()))?;
+
+            match flag {
+                "--spreads" => options.spreads = parse_positive_f64_list(flag, value)?,
+                "--skews" => options.skews = parse_non_negative_f64_list(flag, value)?,
+                "--quantities" => options.quantities = parse_positive_f64_list(flag, value)?,
+                "--fee-rate" => options.fee_rate = parse_non_negative_f64(flag, value)?,
+                _ => {
+                    return Err(format!(
+                        "unknown replay-sweep option: {flag}\n\n{}",
+                        replay_sweep_usage()
+                    ));
+                }
+            }
+
+            index += 2;
+        }
+
+        Ok(options)
+    }
+
+    fn default_for_path(path: String) -> Self {
+        Self {
+            path,
+            spreads: vec![0.2, 0.5, 1.0],
+            skews: vec![0.0, 0.02, 0.05],
+            quantities: vec![0.05, 0.1, 0.2],
+            fee_rate: SimulationConfig::default().fee_rate,
+        }
+    }
+
+    fn run_count(&self) -> usize {
+        self.spreads.len() * self.skews.len() * self.quantities.len()
+    }
+}
+
+fn replay_sweep_usage() -> String {
+    "usage: cargo run -- replay-sweep <events.csv> [--spreads <a,b,c>] [--skews <a,b,c>] [--quantities <a,b,c>] [--fee-rate <value>]".to_string()
+}
+
+fn parse_positive_f64_list(name: &str, value: &str) -> Result<Vec<f64>, String> {
+    parse_f64_list(name, value, parse_positive_f64)
+}
+
+fn parse_non_negative_f64_list(name: &str, value: &str) -> Result<Vec<f64>, String> {
+    parse_f64_list(name, value, parse_non_negative_f64)
+}
+
+fn parse_f64_list(
+    name: &str,
+    value: &str,
+    parser: fn(&str, &str) -> Result<f64, String>,
+) -> Result<Vec<f64>, String> {
+    let values: Result<Vec<f64>, String> = value
+        .split(',')
+        .map(str::trim)
+        .map(|part| {
+            if part.is_empty() {
+                return Err(format!("{name} contains an empty value"));
+            }
+
+            parser(name, part)
+        })
+        .collect();
+    let values = values?;
+
+    if values.is_empty() {
+        return Err(format!("{name} must contain at least one value"));
+    }
+
+    Ok(values)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -296,30 +391,29 @@ struct ReplaySweepResult {
     score: f64,
 }
 
-fn run_replay_sweep(events: Vec<mm_engine::market::MarketEvent>) -> Vec<ReplaySweepResult> {
-    let spreads = [0.2, 0.5, 1.0];
-    let skews = [0.0, 0.02, 0.05];
-    let quantities = [0.05, 0.1, 0.2];
-    let fee_rate = SimulationConfig::default().fee_rate;
+fn run_replay_sweep(
+    events: Vec<MarketEvent>,
+    options: &ReplaySweepOptions,
+) -> Vec<ReplaySweepResult> {
     let mut results = Vec::new();
 
-    for spread in spreads {
-        for skew in skews {
-            for quantity in quantities {
-                let options = ReplayOptions {
+    for spread in &options.spreads {
+        for skew in &options.skews {
+            for quantity in &options.quantities {
+                let replay_options = ReplayOptions {
                     path: "replay_sweep".to_string(),
-                    spread,
-                    skew,
-                    quantity,
-                    fee_rate,
+                    spread: *spread,
+                    skew: *skew,
+                    quantity: *quantity,
+                    fee_rate: options.fee_rate,
                 };
                 let strategy = StrategyParams {
-                    spread,
-                    skew_coeff: skew,
+                    spread: *spread,
+                    skew_coeff: *skew,
                 };
                 let mut data = InMemoryMarketData::new(events.clone());
                 let result = run_replay_simulation(
-                    replay_config(events.len(), &options),
+                    replay_config(events.len(), &replay_options),
                     &mut data,
                     &strategy,
                 );
@@ -328,10 +422,10 @@ fn run_replay_sweep(events: Vec<mm_engine::market::MarketEvent>) -> Vec<ReplaySw
                     let inactivity_penalty = replay_inactivity_penalty(metrics);
                     let score = replay_score(metrics, inactivity_penalty);
                     results.push(ReplaySweepResult {
-                        spread,
-                        skew,
-                        quantity,
-                        fee_rate,
+                        spread: *spread,
+                        skew: *skew,
+                        quantity: *quantity,
+                        fee_rate: options.fee_rate,
                         metrics,
                         inactivity_penalty,
                         score,
@@ -356,9 +450,17 @@ fn replay_inactivity_penalty(metrics: SimulationMetrics) -> f64 {
     missing_fills as f64 * 0.25
 }
 
-fn print_top_replay_sweep_results(path: &str, results: &[ReplaySweepResult]) {
+fn print_top_replay_sweep_results(options: &ReplaySweepOptions, results: &[ReplaySweepResult]) {
     println!("Replay sweep results");
-    println!("data: {path}");
+    println!("data: {}", options.path);
+    println!(
+        "grid: spreads={} skews={} quantities={} runs={}",
+        options.spreads.len(),
+        options.skews.len(),
+        options.quantities.len(),
+        options.run_count()
+    );
+    println!("fee_rate: {:.6}", options.fee_rate);
     println!(
         "{:<4} {:>8} {:>8} {:>8} {:>9} {:>8} {:>8} {:>8} {:>8} {:>8}",
         "rank", "spread", "skew", "qty", "fee_rate", "pnl", "fills", "fees", "drawdown", "score"
@@ -646,6 +748,68 @@ mod tests {
     }
 
     #[test]
+    fn replay_sweep_options_use_defaults() {
+        let options =
+            ReplaySweepOptions::parse(&replay_args(&["replay-sweep", "events.csv"])).unwrap();
+
+        assert_eq!(options.path, "events.csv");
+        assert_eq!(options.spreads, vec![0.2, 0.5, 1.0]);
+        assert_eq!(options.skews, vec![0.0, 0.02, 0.05]);
+        assert_eq!(options.quantities, vec![0.05, 0.1, 0.2]);
+        assert_eq!(options.fee_rate, SimulationConfig::default().fee_rate);
+        assert_eq!(options.run_count(), 27);
+    }
+
+    #[test]
+    fn replay_sweep_options_parse_custom_grid() {
+        let options = ReplaySweepOptions::parse(&replay_args(&[
+            "replay-sweep",
+            "events.csv",
+            "--spreads",
+            "0.25,0.50",
+            "--skews",
+            "0.00,0.03",
+            "--quantities",
+            "0.10,0.20",
+            "--fee-rate",
+            "0.0005",
+        ]))
+        .unwrap();
+
+        assert_eq!(options.spreads, vec![0.25, 0.50]);
+        assert_eq!(options.skews, vec![0.00, 0.03]);
+        assert_eq!(options.quantities, vec![0.10, 0.20]);
+        assert_eq!(options.fee_rate, 0.0005);
+        assert_eq!(options.run_count(), 8);
+    }
+
+    #[test]
+    fn replay_sweep_options_reject_invalid_grid_values() {
+        let error = ReplaySweepOptions::parse(&replay_args(&[
+            "replay-sweep",
+            "events.csv",
+            "--spreads",
+            "0.2,0.0",
+        ]))
+        .unwrap_err();
+
+        assert_eq!(error, "--spreads must be positive");
+    }
+
+    #[test]
+    fn replay_sweep_options_reject_empty_grid_values() {
+        let error = ReplaySweepOptions::parse(&replay_args(&[
+            "replay-sweep",
+            "events.csv",
+            "--quantities",
+            "0.1,",
+        ]))
+        .unwrap_err();
+
+        assert_eq!(error, "--quantities contains an empty value");
+    }
+
+    #[test]
     fn replay_sweep_runs_fixed_grid() {
         let events = vec![
             mm_engine::market::MarketEvent::from_mid(1, 100.0),
@@ -653,8 +817,9 @@ mod tests {
             mm_engine::market::MarketEvent::from_mid(3, 100.0),
             mm_engine::market::MarketEvent::from_mid(4, 100.2),
         ];
+        let options = ReplaySweepOptions::default_for_path("events.csv".to_string());
 
-        let results = run_replay_sweep(events);
+        let results = run_replay_sweep(events, &options);
 
         assert_eq!(results.len(), 27);
         assert!(
@@ -670,7 +835,8 @@ mod tests {
             mm_engine::market::MarketEvent::from_mid(1, 100.0),
             mm_engine::market::MarketEvent::from_mid(2, 100.1),
         ];
-        let results = run_replay_sweep(events);
+        let options = ReplaySweepOptions::default_for_path("events.csv".to_string());
+        let results = run_replay_sweep(events, &options);
         let csv = replay_sweep_results_to_csv(&results);
         let mut lines = csv.lines();
         let header_width = lines.next().unwrap().split(',').count();
