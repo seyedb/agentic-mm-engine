@@ -24,6 +24,21 @@ python3 research/fetch_public_events.py \
   --out data/kraken_solusd_20260701_1200.csv
 ```
 
+Fetch several windows when comparing replay robustness:
+
+```bash
+python3 research/fetch_replay_windows.py \
+  --pair SOLUSD \
+  --interval 1 \
+  --bars 120 \
+  --start 2026-07-01T12:00:00Z \
+  --windows 3 \
+  --step-minutes 120 \
+  --out-dir data
+```
+
+Kraken OHLC responses are subject to the exchange's public history limits.
+
 ## Run A Replay Sweep
 
 ```bash
