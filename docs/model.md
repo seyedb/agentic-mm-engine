@@ -81,6 +81,18 @@ effective_spread = base_spread
 
 Positive inventory lowers the reservation price, making the strategy more willing to sell and less willing to buy. Higher volatility widens quotes and increases the inventory-risk adjustment.
 
+The Avellaneda-Stoikov baseline uses the same reservation-price intuition with an explicit finite-horizon spread term:
+
+```text
+reservation_price = mid_price
+                  - inventory * risk_aversion * estimated_volatility^2 * horizon
+
+spread = risk_aversion * estimated_volatility^2 * horizon
+       + 2 / risk_aversion * log(1 + risk_aversion / liquidity_depth)
+```
+
+When `risk_aversion` is zero, the liquidity spread uses the limiting value `2 / liquidity_depth`. The configured `min_spread` is a floor on the final spread. This keeps the model simple while making the main controls explicit: risk aversion, market depth, horizon, and a minimum allowed quote width.
+
 The regime-adaptive volatility-aware strategy selects a different volatility-aware parameter set for `LowVol`, `NormalVol`, and `HighVol` regimes. This keeps the quoting rule simple while allowing spreads and inventory skew to depend on the current volatility state.
 
 ## Fills

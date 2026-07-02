@@ -19,6 +19,8 @@ const REGIME_SUMMARY_HEADER: &[&str] = &[
     "best_spread",
     "best_volatility_coeff",
     "best_risk_aversion",
+    "best_liquidity_depth",
+    "best_horizon",
     "best_skew",
     "runs",
     "best_score",
@@ -788,12 +790,14 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
     println!("name: {regime}");
     println!("config: {}", config_path.display());
     println!(
-        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
         "rank",
         "runs",
         "spread",
         "vol",
         "risk",
+        "depth",
+        "horizon",
         "skew",
         "avg_pnl",
         "avg_fill",
@@ -809,12 +813,14 @@ fn print_top_results(regime: &str, config_path: &Path, results: &[SweepResult]) 
 
     for (index, result) in results.iter().take(10).enumerate() {
         println!(
-            "{:<4} {:>5} {:>8.2} {:>8} {:>8} {:>8} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+            "{:<4} {:>5} {:>8.2} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
             index + 1,
             result.runs,
             result.representative_spread(),
             optional_f64(result.representative_volatility_coeff()),
             optional_f64(result.strategy.risk_aversion()),
+            optional_f64(result.strategy.liquidity_depth()),
+            optional_f64(result.strategy.horizon()),
             optional_f64(result.representative_skew_coeff()),
             result.metrics.final_pnl,
             result.metrics.total_fills,
@@ -890,6 +896,8 @@ fn regime_summary_row(regime: &str, result: &SweepResult) -> Vec<String> {
         format_csv_f64(result.representative_spread()),
         optional_csv_f64(result.representative_volatility_coeff()),
         optional_csv_f64(result.strategy.risk_aversion()),
+        optional_csv_f64(result.strategy.liquidity_depth()),
+        optional_csv_f64(result.strategy.horizon()),
         optional_csv_f64(result.representative_skew_coeff()),
         result.runs.to_string(),
         format_csv_f64(result.score),

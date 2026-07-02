@@ -1,3 +1,4 @@
+pub mod avellaneda_stoikov;
 pub mod inventory_risk;
 pub mod market_maker;
 pub mod regime_adaptive;

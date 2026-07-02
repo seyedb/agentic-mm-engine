@@ -7,6 +7,7 @@ use crate::engine::simulation::{MarketRegime, SimulationConfig};
 use crate::engine::state::SystemState;
 use crate::experiment::{Experiment, ExperimentReport};
 use crate::market::Quote;
+use crate::strategy::avellaneda_stoikov::AvellanedaStoikovParams;
 use crate::strategy::inventory_risk::InventoryRiskParams;
 use crate::strategy::market_maker::StrategyParams;
 use crate::strategy::regime_adaptive::RegimeAdaptiveVolatilityAwareParams;
@@ -43,6 +44,13 @@ pub enum StrategySweepConfig {
         base_spreads: Vec<f64>,
         volatility_coeffs: Vec<f64>,
         risk_aversions: Vec<f64>,
+    },
+    #[serde(rename = "avellaneda_stoikov")]
+    AvellanedaStoikov {
+        risk_aversions: Vec<f64>,
+        liquidity_depths: Vec<f64>,
+        horizons: Vec<f64>,
+        min_spreads: Vec<f64>,
     },
     #[serde(rename = "regime_adaptive_volatility_aware")]
     RegimeAdaptiveVolatilityAware {
@@ -114,6 +122,12 @@ pub enum SweepStrategyParams {
         volatility_coeff: f64,
         risk_aversion: f64,
     },
+    AvellanedaStoikov {
+        risk_aversion: f64,
+        liquidity_depth: f64,
+        horizon: f64,
+        min_spread: f64,
+    },
     RegimeAdaptiveVolatilityAware {
         low_vol: VolatilityAwareParams,
         normal_vol: VolatilityAwareParams,
@@ -128,6 +142,7 @@ impl SweepStrategyParams {
             Self::VolatilityAware { base_spread, .. } | Self::InventoryRisk { base_spread, .. } => {
                 *base_spread
             }
+            Self::AvellanedaStoikov { min_spread, .. } => *min_spread,
             Self::RegimeAdaptiveVolatilityAware { normal_vol, .. } => normal_vol.base_spread,
         }
     }
@@ -142,7 +157,7 @@ impl SweepStrategyParams {
             Self::FixedSpread { skew_coeff, .. } | Self::VolatilityAware { skew_coeff, .. } => {
                 Some(*skew_coeff)
             }
-            Self::InventoryRisk { .. } => None,
+            Self::InventoryRisk { .. } | Self::AvellanedaStoikov { .. } => None,
             Self::RegimeAdaptiveVolatilityAware { normal_vol, .. } => Some(normal_vol.skew_coeff),
         }
     }
@@ -154,7 +169,7 @@ impl SweepStrategyParams {
 
     pub fn volatility_coeff(&self) -> Option<f64> {
         match self {
-            Self::FixedSpread { .. } => None,
+            Self::FixedSpread { .. } | Self::AvellanedaStoikov { .. } => None,
             Self::VolatilityAware {
                 volatility_coeff, ..
             }
@@ -174,9 +189,32 @@ impl SweepStrategyParams {
 
     pub fn risk_aversion(&self) -> Option<f64> {
         match self {
-            Self::InventoryRisk { risk_aversion, .. } => Some(*risk_aversion),
+            Self::InventoryRisk { risk_aversion, .. }
+            | Self::AvellanedaStoikov { risk_aversion, .. } => Some(*risk_aversion),
             Self::FixedSpread { .. }
             | Self::VolatilityAware { .. }
+            | Self::RegimeAdaptiveVolatilityAware { .. } => None,
+        }
+    }
+
+    pub fn liquidity_depth(&self) -> Option<f64> {
+        match self {
+            Self::AvellanedaStoikov {
+                liquidity_depth, ..
+            } => Some(*liquidity_depth),
+            Self::FixedSpread { .. }
+            | Self::VolatilityAware { .. }
+            | Self::InventoryRisk { .. }
+            | Self::RegimeAdaptiveVolatilityAware { .. } => None,
+        }
+    }
+
+    pub fn horizon(&self) -> Option<f64> {
+        match self {
+            Self::AvellanedaStoikov { horizon, .. } => Some(*horizon),
+            Self::FixedSpread { .. }
+            | Self::VolatilityAware { .. }
+            | Self::InventoryRisk { .. }
             | Self::RegimeAdaptiveVolatilityAware { .. } => None,
         }
     }
@@ -186,6 +224,7 @@ impl SweepStrategyParams {
             Self::FixedSpread { .. } => "fixed_spread",
             Self::VolatilityAware { .. } => "volatility_aware",
             Self::InventoryRisk { .. } => "inventory_risk",
+            Self::AvellanedaStoikov { .. } => "avellaneda_stoikov",
             Self::RegimeAdaptiveVolatilityAware { .. } => "regime_adaptive_volatility_aware",
         }
     }
@@ -203,6 +242,7 @@ impl SweepStrategyParams {
             },
             Self::FixedSpread { .. }
             | Self::VolatilityAware { .. }
+            | Self::AvellanedaStoikov { .. }
             | Self::InventoryRisk { .. } => None,
         }
     }
@@ -234,6 +274,18 @@ impl QuoteStrategy for SweepStrategyParams {
                 base_spread: *base_spread,
                 volatility_coeff: *volatility_coeff,
                 risk_aversion: *risk_aversion,
+            }
+            .quote(state, context),
+            Self::AvellanedaStoikov {
+                risk_aversion,
+                liquidity_depth,
+                horizon,
+                min_spread,
+            } => AvellanedaStoikovParams {
+                risk_aversion: *risk_aversion,
+                liquidity_depth: *liquidity_depth,
+                horizon: *horizon,
+                min_spread: *min_spread,
             }
             .quote(state, context),
             Self::RegimeAdaptiveVolatilityAware {
@@ -346,6 +398,19 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
             volatility_coeffs,
             risk_aversions,
         ),
+        StrategySweepConfig::AvellanedaStoikov {
+            risk_aversions,
+            liquidity_depths,
+            horizons,
+            min_spreads,
+        } => run_avellaneda_stoikov_sweep(
+            &config.simulation,
+            &seeds,
+            risk_aversions,
+            liquidity_depths,
+            horizons,
+            min_spreads,
+        ),
         StrategySweepConfig::RegimeAdaptiveVolatilityAware {
             low_vol,
             normal_vol,
@@ -372,7 +437,7 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
 
 pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
     let mut csv = String::from(
-        "rank,experiment,strategy_type,spread,volatility_coeff,risk_aversion,skew,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
+        "rank,experiment,strategy_type,spread,volatility_coeff,risk_aversion,liquidity_depth,horizon,skew,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
          avg_max_pnl,avg_max_drawdown,avg_final_inventory,avg_max_abs_inventory,\
          max_drawdown_std,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,\
          avg_traded_notional,avg_total_fees,avg_total_adverse_selection,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps,\
@@ -390,6 +455,8 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
             format_f64(result.representative_spread()),
             optional_f64(result.representative_volatility_coeff()),
             optional_f64(result.strategy.risk_aversion()),
+            optional_f64(result.strategy.liquidity_depth()),
+            optional_f64(result.strategy.horizon()),
             optional_f64(result.representative_skew_coeff()),
             result.runs.to_string(),
             format_f64(result.score),
@@ -684,6 +751,50 @@ fn run_inventory_risk_sweep(
 
                 if let Some(result) = aggregate_reports(name, sweep_strategy, &reports) {
                     results.push(result);
+                }
+            }
+        }
+    }
+
+    results
+}
+
+fn run_avellaneda_stoikov_sweep(
+    simulation: &SimulationConfig,
+    seeds: &[u64],
+    risk_aversions: &[f64],
+    liquidity_depths: &[f64],
+    horizons: &[f64],
+    min_spreads: &[f64],
+) -> Vec<SweepResult> {
+    let mut results = Vec::with_capacity(
+        risk_aversions.len() * liquidity_depths.len() * horizons.len() * min_spreads.len(),
+    );
+
+    for risk_aversion in risk_aversions {
+        for liquidity_depth in liquidity_depths {
+            for horizon in horizons {
+                for min_spread in min_spreads {
+                    let strategy = AvellanedaStoikovParams {
+                        risk_aversion: *risk_aversion,
+                        liquidity_depth: *liquidity_depth,
+                        horizon: *horizon,
+                        min_spread: *min_spread,
+                    };
+                    let name = format!(
+                        "risk_{risk_aversion:.2}_depth_{liquidity_depth:.2}_horizon_{horizon:.2}_min_{min_spread:.2}"
+                    );
+                    let reports = run_seeded_reports(simulation, seeds, &name, &strategy);
+                    let sweep_strategy = SweepStrategyParams::AvellanedaStoikov {
+                        risk_aversion: *risk_aversion,
+                        liquidity_depth: *liquidity_depth,
+                        horizon: *horizon,
+                        min_spread: *min_spread,
+                    };
+
+                    if let Some(result) = aggregate_reports(name, sweep_strategy, &reports) {
+                        results.push(result);
+                    }
                 }
             }
         }
@@ -1000,6 +1111,37 @@ mod tests {
             results
                 .iter()
                 .all(|result| result.strategy.risk_aversion().is_some())
+        );
+    }
+
+    #[test]
+    fn avellaneda_stoikov_sweep_runs_each_parameter_combination() {
+        let results = run_parameter_sweep(SweepConfig {
+            name: None,
+            simulation: SimulationConfig {
+                steps: 100,
+                ..SimulationConfig::default()
+            },
+            seeds: vec![1],
+            strategy: StrategySweepConfig::AvellanedaStoikov {
+                risk_aversions: vec![0.05, 0.1],
+                liquidity_depths: vec![5.0, 10.0],
+                horizons: vec![5.0],
+                min_spreads: vec![0.1, 0.2],
+            },
+            scoring: ScoringConfig::default(),
+        });
+
+        assert_eq!(results.len(), 8);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.strategy.strategy_type() == "avellaneda_stoikov")
+        );
+        assert!(
+            results
+                .iter()
+                .all(|result| result.strategy.liquidity_depth().is_some())
         );
     }
 
