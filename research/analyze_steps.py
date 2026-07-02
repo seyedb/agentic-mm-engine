@@ -38,6 +38,9 @@ class Accumulator:
     signed_adverse_move: float = 0.0
     abs_inventory: float = 0.0
     spread: float = 0.0
+    observed_quote_steps: int = 0
+    bid_distance: float = 0.0
+    ask_distance: float = 0.0
 
     def update(self, row: dict[str, str]) -> None:
         self.steps += 1
@@ -48,6 +51,14 @@ class Accumulator:
         self.signed_adverse_move += adverse_move
         self.abs_inventory += abs(parse_float(row["inventory"], "inventory"))
         self.spread += parse_float(row["spread"], "spread")
+        if has_observed_quote_distances(row):
+            self.observed_quote_steps += 1
+            self.bid_distance += parse_float(
+                row["bid_distance_to_observed_ask"], "bid_distance_to_observed_ask"
+            )
+            self.ask_distance += parse_float(
+                row["ask_distance_to_observed_bid"], "ask_distance_to_observed_bid"
+            )
 
     @property
     def fill_rate(self) -> float:
@@ -60,6 +71,22 @@ class Accumulator:
     @property
     def avg_spread(self) -> float:
         return self.spread / self.steps if self.steps else 0.0
+
+    @property
+    def avg_bid_distance(self) -> float:
+        return (
+            self.bid_distance / self.observed_quote_steps
+            if self.observed_quote_steps
+            else 0.0
+        )
+
+    @property
+    def avg_ask_distance(self) -> float:
+        return (
+            self.ask_distance / self.observed_quote_steps
+            if self.observed_quote_steps
+            else 0.0
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,6 +115,13 @@ def parse_int(value: str, column: str) -> int:
         return int(value)
     except ValueError as exc:
         raise ValueError(f"invalid integer in column '{column}': {value!r}") from exc
+
+
+def has_observed_quote_distances(row: dict[str, str]) -> bool:
+    return bool(
+        row.get("bid_distance_to_observed_ask")
+        and row.get("ask_distance_to_observed_bid")
+    )
 
 
 def spread_bucket(spread: float, bucket_size: float) -> tuple[float, str]:
@@ -157,6 +191,17 @@ def accumulator_row(name: str, acc: Accumulator) -> list[str]:
     ]
 
 
+def quote_distance_row(name: str, acc: Accumulator) -> list[str]:
+    return [
+        name,
+        str(acc.observed_quote_steps),
+        str(acc.fills),
+        format_number(acc.fill_rate, 4),
+        format_number(acc.avg_bid_distance, 4),
+        format_number(acc.avg_ask_distance, 4),
+    ]
+
+
 def regime_rows(by_regime: dict[str, Accumulator]) -> list[list[str]]:
     ordered = [regime for regime in REGIME_ORDER if regime in by_regime]
     ordered.extend(sorted(regime for regime in by_regime if regime not in REGIME_ORDER))
@@ -204,6 +249,17 @@ def main() -> int:
     print(render_table("By regime", headers, regime_rows(by_regime)))
     print()
     print(render_table("By spread bucket", headers, spread_rows(by_spread)))
+    if overall.observed_quote_steps:
+        quote_headers = [
+            "bucket",
+            "quote_steps",
+            "fills",
+            "fill_rate",
+            "avg_bid_dist",
+            "avg_ask_dist",
+        ]
+        print()
+        print(render_table("By quote distance", quote_headers, [quote_distance_row("overall", overall)]))
     return 0
 
 
