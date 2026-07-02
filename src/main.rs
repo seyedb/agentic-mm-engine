@@ -12,6 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_CONFIG_PATH: &str = "configs/baseline_sweep.json";
+const QUOTE_DISTANCE_SCORE_WEIGHT: f64 = 0.1;
 const REGIME_SUMMARY_HEADER: &[&str] = &[
     "regime",
     "strategy_type",
@@ -444,6 +445,10 @@ struct ReplaySweepMetrics {
     low_vol_steps: f64,
     normal_vol_steps: f64,
     high_vol_steps: f64,
+    observed_quote_steps: f64,
+    avg_bid_distance_to_observed_ask: f64,
+    avg_ask_distance_to_observed_bid: f64,
+    avg_quote_distance: f64,
 }
 
 fn run_replay_sweep(
@@ -462,6 +467,7 @@ fn run_replay_sweep(
                 let mut metrics_by_seed = Vec::new();
                 let mut scores_by_seed = Vec::new();
                 let mut inactivity_by_seed = Vec::new();
+                let mut quote_distance_by_seed = Vec::new();
 
                 for seed in &options.seeds {
                     let replay_options = ReplayOptions {
@@ -478,10 +484,12 @@ fn run_replay_sweep(
 
                     if let Some(metrics) = SimulationMetrics::from_result(&result) {
                         let inactivity_penalty = replay_inactivity_penalty(metrics);
-                        let score = replay_score(metrics, inactivity_penalty);
+                        let quote_distance = replay_quote_distance(&result);
+                        let score = replay_score(metrics, inactivity_penalty, quote_distance);
                         metrics_by_seed.push(metrics);
                         scores_by_seed.push(score);
                         inactivity_by_seed.push(inactivity_penalty);
+                        quote_distance_by_seed.push(quote_distance);
                     }
                 }
 
@@ -494,7 +502,10 @@ fn run_replay_sweep(
                         quantity: *quantity,
                         fee_rate: options.fee_rate,
                         runs: metrics_by_seed.len(),
-                        metrics: aggregate_replay_metrics(&metrics_by_seed),
+                        metrics: aggregate_replay_metrics(
+                            &metrics_by_seed,
+                            &quote_distance_by_seed,
+                        ),
                         inactivity_penalty: mean(&inactivity_by_seed),
                         score,
                         score_std,
@@ -509,9 +520,36 @@ fn run_replay_sweep(
     results
 }
 
-fn aggregate_replay_metrics(metrics: &[SimulationMetrics]) -> ReplaySweepMetrics {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ReplayQuoteDistance {
+    observed_quote_steps: usize,
+    avg_bid_distance_to_observed_ask: f64,
+    avg_ask_distance_to_observed_bid: f64,
+    avg_quote_distance: f64,
+}
+
+fn aggregate_replay_metrics(
+    metrics: &[SimulationMetrics],
+    quote_distances: &[ReplayQuoteDistance],
+) -> ReplaySweepMetrics {
     let final_pnls: Vec<f64> = metrics.iter().map(|metric| metric.final_pnl).collect();
     let max_drawdowns: Vec<f64> = metrics.iter().map(|metric| metric.max_drawdown).collect();
+    let observed_quote_steps: Vec<f64> = quote_distances
+        .iter()
+        .map(|distance| distance.observed_quote_steps as f64)
+        .collect();
+    let bid_distances: Vec<f64> = quote_distances
+        .iter()
+        .map(|distance| distance.avg_bid_distance_to_observed_ask)
+        .collect();
+    let ask_distances: Vec<f64> = quote_distances
+        .iter()
+        .map(|distance| distance.avg_ask_distance_to_observed_bid)
+        .collect();
+    let quote_distances: Vec<f64> = quote_distances
+        .iter()
+        .map(|distance| distance.avg_quote_distance)
+        .collect();
 
     ReplaySweepMetrics {
         final_pnl: mean(&final_pnls),
@@ -533,6 +571,10 @@ fn aggregate_replay_metrics(metrics: &[SimulationMetrics]) -> ReplaySweepMetrics
         low_vol_steps: mean_metric(metrics, |metric| metric.low_vol_steps as f64),
         normal_vol_steps: mean_metric(metrics, |metric| metric.normal_vol_steps as f64),
         high_vol_steps: mean_metric(metrics, |metric| metric.high_vol_steps as f64),
+        observed_quote_steps: mean(&observed_quote_steps),
+        avg_bid_distance_to_observed_ask: mean(&bid_distances),
+        avg_ask_distance_to_observed_bid: mean(&ask_distances),
+        avg_quote_distance: mean(&quote_distances),
     }
 }
 
@@ -564,8 +606,60 @@ fn std_dev(values: &[f64]) -> f64 {
     variance.sqrt()
 }
 
-fn replay_score(metrics: SimulationMetrics, inactivity_penalty: f64) -> f64 {
-    metrics.final_pnl - 2.0 * metrics.max_drawdown - metrics.max_abs_inventory - inactivity_penalty
+fn replay_score(
+    metrics: SimulationMetrics,
+    inactivity_penalty: f64,
+    quote_distance: ReplayQuoteDistance,
+) -> f64 {
+    metrics.final_pnl
+        - 2.0 * metrics.max_drawdown
+        - metrics.max_abs_inventory
+        - inactivity_penalty
+        - quote_distance_penalty(quote_distance)
+}
+
+fn quote_distance_penalty(quote_distance: ReplayQuoteDistance) -> f64 {
+    if quote_distance.observed_quote_steps == 0 {
+        0.0
+    } else {
+        QUOTE_DISTANCE_SCORE_WEIGHT * quote_distance.avg_quote_distance.max(0.0)
+    }
+}
+
+fn replay_quote_distance(result: &SimulationResult) -> ReplayQuoteDistance {
+    let mut observed_quote_steps = 0;
+    let mut bid_distance = 0.0;
+    let mut ask_distance = 0.0;
+
+    for step in &result.steps {
+        let Some(observed_quote) = step.observed_quote else {
+            continue;
+        };
+
+        observed_quote_steps += 1;
+        bid_distance += observed_quote.ask - step.quote.bid;
+        ask_distance += step.quote.ask - observed_quote.bid;
+    }
+
+    if observed_quote_steps == 0 {
+        return ReplayQuoteDistance {
+            observed_quote_steps,
+            avg_bid_distance_to_observed_ask: 0.0,
+            avg_ask_distance_to_observed_bid: 0.0,
+            avg_quote_distance: 0.0,
+        };
+    }
+
+    let avg_bid_distance_to_observed_ask = bid_distance / observed_quote_steps as f64;
+    let avg_ask_distance_to_observed_bid = ask_distance / observed_quote_steps as f64;
+
+    ReplayQuoteDistance {
+        observed_quote_steps,
+        avg_bid_distance_to_observed_ask,
+        avg_ask_distance_to_observed_bid,
+        avg_quote_distance: (avg_bid_distance_to_observed_ask + avg_ask_distance_to_observed_bid)
+            / 2.0,
+    }
 }
 
 fn replay_inactivity_penalty(metrics: SimulationMetrics) -> f64 {
@@ -589,7 +683,7 @@ fn print_top_replay_sweep_results(options: &ReplaySweepOptions, results: &[Repla
     );
     println!("fee_rate: {:.6}", options.fee_rate);
     println!(
-        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>9} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "{:<4} {:>5} {:>8} {:>8} {:>8} {:>9} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
         "rank",
         "runs",
         "spread",
@@ -600,6 +694,7 @@ fn print_top_replay_sweep_results(options: &ReplaySweepOptions, results: &[Repla
         "fills",
         "fees",
         "drawdown",
+        "q_dist",
         "score_sd",
         "stable"
     );
@@ -607,7 +702,7 @@ fn print_top_replay_sweep_results(options: &ReplaySweepOptions, results: &[Repla
     for (index, result) in results.iter().take(10).enumerate() {
         let metrics = result.metrics;
         println!(
-            "{:<4} {:>5} {:>8.2} {:>8.2} {:>8.2} {:>9.4} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+            "{:<4} {:>5} {:>8.2} {:>8.2} {:>8.2} {:>9.4} {:>8.2} {:>8.1} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
             index + 1,
             result.runs,
             result.spread,
@@ -618,6 +713,7 @@ fn print_top_replay_sweep_results(options: &ReplaySweepOptions, results: &[Repla
             metrics.total_fills,
             metrics.total_fees,
             metrics.max_drawdown,
+            metrics.avg_quote_distance,
             result.score_std,
             result.stable_score,
         );
@@ -626,7 +722,7 @@ fn print_top_replay_sweep_results(options: &ReplaySweepOptions, results: &[Repla
 
 fn replay_sweep_results_to_csv(results: &[ReplaySweepResult]) -> String {
     let mut csv = String::from(
-        "rank,spread,skew,quantity,fee_rate,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,avg_max_pnl,avg_max_drawdown,max_drawdown_std,avg_final_inventory,avg_max_abs_inventory,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,avg_traded_notional,avg_total_fees,avg_total_adverse_selection,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps\n",
+        "rank,spread,skew,quantity,fee_rate,runs,score,score_std,stable_score,inactivity_penalty,quote_distance_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,avg_max_pnl,avg_max_drawdown,max_drawdown_std,avg_final_inventory,avg_max_abs_inventory,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,avg_traded_notional,avg_total_fees,avg_total_adverse_selection,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps,avg_observed_quote_steps,avg_bid_distance_to_observed_ask,avg_ask_distance_to_observed_bid,avg_quote_distance\n",
     );
 
     for (index, result) in results.iter().enumerate() {
@@ -642,6 +738,12 @@ fn replay_sweep_results_to_csv(results: &[ReplaySweepResult]) -> String {
             format_csv_f64(result.score_std),
             format_csv_f64(result.stable_score),
             format_csv_f64(result.inactivity_penalty),
+            format_csv_f64(quote_distance_penalty(ReplayQuoteDistance {
+                observed_quote_steps: metrics.observed_quote_steps as usize,
+                avg_bid_distance_to_observed_ask: metrics.avg_bid_distance_to_observed_ask,
+                avg_ask_distance_to_observed_bid: metrics.avg_ask_distance_to_observed_bid,
+                avg_quote_distance: metrics.avg_quote_distance,
+            })),
             format_csv_f64(metrics.final_pnl),
             format_csv_f64(metrics.final_pnl_std),
             format_csv_f64(metrics.min_pnl),
@@ -661,6 +763,10 @@ fn replay_sweep_results_to_csv(results: &[ReplaySweepResult]) -> String {
             format_csv_f64(metrics.low_vol_steps),
             format_csv_f64(metrics.normal_vol_steps),
             format_csv_f64(metrics.high_vol_steps),
+            format_csv_f64(metrics.observed_quote_steps),
+            format_csv_f64(metrics.avg_bid_distance_to_observed_ask),
+            format_csv_f64(metrics.avg_ask_distance_to_observed_bid),
+            format_csv_f64(metrics.avg_quote_distance),
         ];
 
         csv.push_str(&row.join(","));
@@ -1012,6 +1118,28 @@ mod tests {
         assert_eq!(results[0].runs, 3);
         assert!(results[0].score_std >= 0.0);
         assert!(results[0].metrics.final_pnl_std >= 0.0);
+    }
+
+    #[test]
+    fn replay_sweep_penalizes_observed_quote_distance() {
+        let events = vec![mm_engine::market::MarketEvent {
+            timestamp_ms: 1,
+            mid_price: 100.0,
+            bid: Some(99.99),
+            ask: Some(100.01),
+        }];
+        let mut options = ReplaySweepOptions::default_for_path("events.csv".to_string());
+        options.seeds = vec![42];
+        options.spreads = vec![0.5, 1.0];
+        options.skews = vec![0.0];
+        options.quantities = vec![0.1];
+
+        let results = run_replay_sweep(events, &options);
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].spread, 0.5);
+        assert!(results[0].metrics.avg_quote_distance < results[1].metrics.avg_quote_distance);
+        assert!(results[0].stable_score > results[1].stable_score);
     }
 
     #[test]

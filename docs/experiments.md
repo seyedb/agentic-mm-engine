@@ -103,9 +103,11 @@ score = final_pnl
       - drawdown_weight * max_drawdown
       - inventory_weight * max_abs_inventory
       - inactivity_penalty
+      - quote_distance_penalty
 ```
 
 The inactivity penalty discourages strategies that avoid trading entirely.
+The quote distance penalty is only applied to replay sweeps when observed `bid` and `ask` data are available.
 
 Rankings use a stability-adjusted score:
 

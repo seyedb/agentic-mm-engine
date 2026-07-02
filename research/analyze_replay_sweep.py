@@ -45,11 +45,14 @@ class SweepRow:
     score: float
     score_std: float
     stable_score: float
+    quote_distance_penalty: float
     avg_final_pnl: float
     avg_max_drawdown: float
     avg_max_abs_inventory: float
     avg_total_fills: float
     avg_total_fees: float
+    avg_observed_quote_steps: float
+    avg_quote_distance: float
     inactivity_penalty: float
 
 
@@ -60,11 +63,14 @@ class Accumulator:
     score: float = 0.0
     score_std: float = 0.0
     stable_score: float = 0.0
+    quote_distance_penalty: float = 0.0
     final_pnl: float = 0.0
     fills: float = 0.0
     fees: float = 0.0
     max_drawdown: float = 0.0
     max_abs_inventory: float = 0.0
+    observed_quote_steps: float = 0.0
+    quote_distance: float = 0.0
     inactivity_penalty: float = 0.0
 
     def update(self, row: SweepRow) -> None:
@@ -73,11 +79,14 @@ class Accumulator:
         self.score += row.score
         self.score_std += row.score_std
         self.stable_score += row.stable_score
+        self.quote_distance_penalty += row.quote_distance_penalty
         self.final_pnl += row.avg_final_pnl
         self.fills += row.avg_total_fills
         self.fees += row.avg_total_fees
         self.max_drawdown += row.avg_max_drawdown
         self.max_abs_inventory += row.avg_max_abs_inventory
+        self.observed_quote_steps += row.avg_observed_quote_steps
+        self.quote_distance += row.avg_quote_distance
         self.inactivity_penalty += row.inactivity_penalty
 
     def avg(self, value: float) -> float:
@@ -104,6 +113,13 @@ def parse_int(value: str, column: str) -> int:
         raise ValueError(f"invalid integer in column '{column}': {value!r}") from exc
 
 
+def parse_optional_float(row: dict[str, str], column: str) -> float:
+    value = row.get(column)
+    if value is None or value == "":
+        return 0.0
+    return parse_float(value, column)
+
+
 def parse_row(row: dict[str, str]) -> SweepRow:
     return SweepRow(
         rank=parse_int(row["rank"], "rank"),
@@ -115,6 +131,7 @@ def parse_row(row: dict[str, str]) -> SweepRow:
         score=parse_float(row["score"], "score"),
         score_std=parse_float(row["score_std"], "score_std"),
         stable_score=parse_float(row["stable_score"], "stable_score"),
+        quote_distance_penalty=parse_optional_float(row, "quote_distance_penalty"),
         avg_final_pnl=parse_float(row["avg_final_pnl"], "avg_final_pnl"),
         avg_max_drawdown=parse_float(row["avg_max_drawdown"], "avg_max_drawdown"),
         avg_max_abs_inventory=parse_float(
@@ -122,6 +139,8 @@ def parse_row(row: dict[str, str]) -> SweepRow:
         ),
         avg_total_fills=parse_float(row["avg_total_fills"], "avg_total_fills"),
         avg_total_fees=parse_float(row["avg_total_fees"], "avg_total_fees"),
+        avg_observed_quote_steps=parse_optional_float(row, "avg_observed_quote_steps"),
+        avg_quote_distance=parse_optional_float(row, "avg_quote_distance"),
         inactivity_penalty=parse_float(row["inactivity_penalty"], "inactivity_penalty"),
     )
 
@@ -176,11 +195,14 @@ def accumulator_row(label: float, acc: Accumulator) -> list[str]:
         format_number(acc.avg(acc.stable_score), 4),
         format_number(acc.avg(acc.score), 4),
         format_number(acc.avg(acc.score_std), 4),
+        format_number(acc.avg(acc.quote_distance_penalty), 4),
         format_number(acc.avg(acc.final_pnl), 4),
         format_number(acc.avg(acc.fills), 2),
         format_number(acc.avg(acc.fees), 4),
         format_number(acc.avg(acc.max_drawdown), 4),
         format_number(acc.avg(acc.max_abs_inventory), 4),
+        format_number(acc.avg(acc.observed_quote_steps), 2),
+        format_number(acc.avg(acc.quote_distance), 4),
         format_number(acc.avg(acc.inactivity_penalty), 4),
     ]
 
@@ -201,7 +223,8 @@ def print_best(row: SweepRow) -> None:
     print(
         "spread={spread:.2f} skew={skew:.2f} quantity={quantity:.2f} "
         "runs={runs} stable_score={stable:.4f} avg_score={score:.4f} "
-        "score_std={score_std:.4f} avg_pnl={pnl:.4f} avg_fills={fills:.2f}".format(
+        "score_std={score_std:.4f} quote_distance={quote_distance:.4f} "
+        "avg_pnl={pnl:.4f} avg_fills={fills:.2f}".format(
             spread=row.spread,
             skew=row.skew,
             quantity=row.quantity,
@@ -209,6 +232,7 @@ def print_best(row: SweepRow) -> None:
             stable=row.stable_score,
             score=row.score,
             score_std=row.score_std,
+            quote_distance=row.avg_quote_distance,
             pnl=row.avg_final_pnl,
             fills=row.avg_total_fills,
         )
@@ -237,11 +261,14 @@ def main() -> int:
         "avg_stable",
         "avg_score",
         "avg_score_sd",
+        "avg_q_pen",
         "avg_pnl",
         "avg_fills",
         "avg_fees",
         "avg_drawdown",
         "avg_max_inv",
+        "avg_q_steps",
+        "avg_q_dist",
         "avg_idle",
     ]
     print(render_table("By spread", headers, grouped_rows(grouped(rows, "spread"))))

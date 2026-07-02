@@ -54,11 +54,13 @@ class SweepRow:
     score: float
     score_std: float
     stable_score: float
+    quote_distance_penalty: float
     avg_final_pnl: float
     avg_max_drawdown: float
     avg_max_abs_inventory: float
     avg_total_fills: float
     avg_total_fees: float
+    avg_quote_distance: float
     inactivity_penalty: float
 
     def parameter_key(self) -> tuple[float, float, float, float]:
@@ -71,22 +73,26 @@ class ParameterAccumulator:
     seed_runs: int = 0
     stable_scores: list[float] = field(default_factory=list)
     scores: list[float] = field(default_factory=list)
+    quote_distance_penalties: list[float] = field(default_factory=list)
     final_pnls: list[float] = field(default_factory=list)
     drawdowns: list[float] = field(default_factory=list)
     fills: list[float] = field(default_factory=list)
     fees: list[float] = field(default_factory=list)
     max_inventories: list[float] = field(default_factory=list)
+    quote_distances: list[float] = field(default_factory=list)
 
     def update(self, row: SweepRow) -> None:
         self.datasets.add(row.dataset)
         self.seed_runs += row.runs
         self.stable_scores.append(row.stable_score)
         self.scores.append(row.score)
+        self.quote_distance_penalties.append(row.quote_distance_penalty)
         self.final_pnls.append(row.avg_final_pnl)
         self.drawdowns.append(row.avg_max_drawdown)
         self.fills.append(row.avg_total_fills)
         self.fees.append(row.avg_total_fees)
         self.max_inventories.append(row.avg_max_abs_inventory)
+        self.quote_distances.append(row.avg_quote_distance)
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,6 +130,13 @@ def parse_int(value: str, column: str) -> int:
         raise ValueError(f"invalid integer in column '{column}': {value!r}") from exc
 
 
+def parse_optional_float(row: dict[str, str], column: str) -> float:
+    value = row.get(column)
+    if value is None or value == "":
+        return 0.0
+    return parse_float(value, column)
+
+
 def parse_row(dataset: str, row: dict[str, str]) -> SweepRow:
     return SweepRow(
         dataset=dataset,
@@ -136,6 +149,7 @@ def parse_row(dataset: str, row: dict[str, str]) -> SweepRow:
         score=parse_float(row["score"], "score"),
         score_std=parse_float(row["score_std"], "score_std"),
         stable_score=parse_float(row["stable_score"], "stable_score"),
+        quote_distance_penalty=parse_optional_float(row, "quote_distance_penalty"),
         avg_final_pnl=parse_float(row["avg_final_pnl"], "avg_final_pnl"),
         avg_max_drawdown=parse_float(row["avg_max_drawdown"], "avg_max_drawdown"),
         avg_max_abs_inventory=parse_float(
@@ -143,6 +157,7 @@ def parse_row(dataset: str, row: dict[str, str]) -> SweepRow:
         ),
         avg_total_fills=parse_float(row["avg_total_fills"], "avg_total_fills"),
         avg_total_fees=parse_float(row["avg_total_fees"], "avg_total_fees"),
+        avg_quote_distance=parse_optional_float(row, "avg_quote_distance"),
         inactivity_penalty=parse_float(row["inactivity_penalty"], "inactivity_penalty"),
     )
 
@@ -198,6 +213,8 @@ def write_best(rows_by_dataset: dict[str, list[SweepRow]], path: Path) -> None:
                 "stable_score",
                 "score",
                 "score_std",
+                "quote_distance_penalty",
+                "avg_quote_distance",
                 "avg_final_pnl",
                 "avg_max_drawdown",
                 "avg_total_fills",
@@ -219,6 +236,8 @@ def write_best(rows_by_dataset: dict[str, list[SweepRow]], path: Path) -> None:
                     format_number(best.stable_score),
                     format_number(best.score),
                     format_number(best.score_std),
+                    format_number(best.quote_distance_penalty),
+                    format_number(best.avg_quote_distance),
                     format_number(best.avg_final_pnl),
                     format_number(best.avg_max_drawdown),
                     format_number(best.avg_total_fills),
@@ -258,6 +277,8 @@ def write_parameters(rows: list[SweepRow], path: Path) -> None:
                 "avg_stable_score",
                 "stable_score_std",
                 "avg_score",
+                "avg_quote_distance_penalty",
+                "avg_quote_distance",
                 "avg_final_pnl",
                 "avg_max_drawdown",
                 "avg_total_fills",
@@ -278,6 +299,8 @@ def write_parameters(rows: list[SweepRow], path: Path) -> None:
                     format_number(mean(acc.stable_scores)),
                     format_number(std_dev(acc.stable_scores)),
                     format_number(mean(acc.scores)),
+                    format_number(mean(acc.quote_distance_penalties)),
+                    format_number(mean(acc.quote_distances)),
                     format_number(mean(acc.final_pnls)),
                     format_number(mean(acc.drawdowns)),
                     format_number(mean(acc.fills)),
