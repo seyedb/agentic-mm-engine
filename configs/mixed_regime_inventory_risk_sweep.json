@@ -1,0 +1,45 @@
+{
+  "name": "mixed_regime_inventory_risk",
+  "simulation": {
+    "steps": 10000,
+    "initial_mid_price": 100.0,
+    "seed": 42,
+    "price_volatility": 0.1,
+    "volatility_schedule": [
+      { "start_step": 0, "price_volatility": 0.05 },
+      { "start_step": 2000, "price_volatility": 0.12 },
+      { "start_step": 4500, "price_volatility": 0.28 },
+      { "start_step": 7000, "price_volatility": 0.12 },
+      { "start_step": 8500, "price_volatility": 0.05 }
+    ],
+    "fill_price_noise": 0.14,
+    "fill_model": {
+      "type": "distance_intensity",
+      "base_intensity": 0.12,
+      "distance_decay": 4.0,
+      "volatility_boost": 1.0
+    },
+    "regime": {
+      "low_volatility_threshold": 0.08,
+      "high_volatility_threshold": 0.18
+    },
+    "order_quantity": 1.0,
+    "fee_rate": 0.001,
+    "adverse_selection_per_fill": 0.03,
+    "volatility_window": 50
+  },
+  "seeds": [38, 39, 40, 41, 42],
+  "strategy": {
+    "type": "inventory_risk",
+    "base_spreads": [0.2, 0.3, 0.5],
+    "volatility_coeffs": [0.0, 1.0, 2.0],
+    "risk_aversions": [0.5, 1.0, 2.0]
+  },
+  "scoring": {
+    "drawdown_weight": 2.0,
+    "inventory_weight": 1.0,
+    "min_fills": 50,
+    "missing_fill_penalty": 0.25,
+    "stability_weight": 0.25
+  }
+}

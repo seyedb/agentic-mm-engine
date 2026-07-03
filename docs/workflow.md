@@ -99,3 +99,19 @@ target/research/replay_sweep_parameters.csv
 ```
 
 Use this step to check whether a parameter set is robust across datasets instead of only strong on one replay.
+
+## Compare Strategy Families
+
+Run the shared mixed-regime strategy comparison:
+
+```bash
+python3 research/compare_strategy_sweeps.py
+```
+
+This runs the mixed-regime fixed-spread, volatility-aware, inventory-risk, regime-adaptive, and Avellaneda-Stoikov sweeps, then writes:
+
+```text
+target/research/strategy_comparison.csv
+```
+
+Use `--skip-run` to compare existing report CSVs without rerunning the Rust sweeps.

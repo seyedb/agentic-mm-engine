@@ -6,6 +6,8 @@ The configs are grouped by market environment. The main research run is the mixe
 
 - `baseline_sweep.json`: fixed-spread baseline in a mostly normal-volatility environment.
 - `baseline_volatility_aware_sweep.json`: volatility-aware quoting in the baseline environment.
+- `mixed_regime_fixed_spread_sweep.json`: fixed-spread baseline in the mixed-regime environment.
+- `mixed_regime_inventory_risk_sweep.json`: inventory-risk heuristic in the mixed-regime environment.
 - `mixed_regime_avellaneda_stoikov_sweep.json`: finite-horizon Avellaneda-Stoikov baseline in the mixed-regime environment.
 - `mixed_regime_adaptive_sweep.json`: main mixed-regime experiment with regime-conditioned quoting.
 
