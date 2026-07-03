@@ -95,6 +95,15 @@ When `risk_aversion` is zero, the liquidity spread uses the limiting value `2 / 
 
 The regime-adaptive volatility-aware strategy selects a different volatility-aware parameter set for `LowVol`, `NormalVol`, and `HighVol` regimes. This keeps the quoting rule simple while allowing spreads and inventory skew to depend on the current volatility state.
 
+## Controller
+
+The first agentic component is a rule-based controller. It observes the current inventory and volatility regime, then chooses between two quoting modes:
+
+- fixed-spread quoting during normal conditions
+- Avellaneda-Stoikov risk-managed quoting during high volatility or when absolute inventory reaches the configured inventory limit
+
+This is intentionally simple. The controller is the decision layer where later paper-trading and ML policies can plug in without replacing the accounting, replay, or strategy code.
+
 ## Fills
 
 The legacy fill model samples a noisy market price and fills crossed quotes:

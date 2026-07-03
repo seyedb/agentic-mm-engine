@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use std::fmt::Write;
 
+use crate::agent::RuleBasedControllerParams;
 use crate::engine::metrics::SimulationMetrics;
 use crate::engine::simulation::{MarketRegime, SimulationConfig};
 use crate::engine::state::SystemState;
@@ -51,6 +52,16 @@ pub enum StrategySweepConfig {
         liquidity_depths: Vec<f64>,
         horizons: Vec<f64>,
         min_spreads: Vec<f64>,
+    },
+    #[serde(rename = "rule_based_controller")]
+    RuleBasedController {
+        fixed_spreads: Vec<f64>,
+        fixed_skew_coeffs: Vec<f64>,
+        risk_aversions: Vec<f64>,
+        liquidity_depths: Vec<f64>,
+        horizons: Vec<f64>,
+        min_spreads: Vec<f64>,
+        inventory_limits: Vec<f64>,
     },
     #[serde(rename = "regime_adaptive_volatility_aware")]
     RegimeAdaptiveVolatilityAware {
@@ -128,6 +139,15 @@ pub enum SweepStrategyParams {
         horizon: f64,
         min_spread: f64,
     },
+    RuleBasedController {
+        fixed_spread: f64,
+        fixed_skew_coeff: f64,
+        risk_aversion: f64,
+        liquidity_depth: f64,
+        horizon: f64,
+        min_spread: f64,
+        inventory_limit: f64,
+    },
     RegimeAdaptiveVolatilityAware {
         low_vol: VolatilityAwareParams,
         normal_vol: VolatilityAwareParams,
@@ -143,6 +163,7 @@ impl SweepStrategyParams {
                 *base_spread
             }
             Self::AvellanedaStoikov { min_spread, .. } => *min_spread,
+            Self::RuleBasedController { fixed_spread, .. } => *fixed_spread,
             Self::RegimeAdaptiveVolatilityAware { normal_vol, .. } => normal_vol.base_spread,
         }
     }
@@ -157,6 +178,9 @@ impl SweepStrategyParams {
             Self::FixedSpread { skew_coeff, .. } | Self::VolatilityAware { skew_coeff, .. } => {
                 Some(*skew_coeff)
             }
+            Self::RuleBasedController {
+                fixed_skew_coeff, ..
+            } => Some(*fixed_skew_coeff),
             Self::InventoryRisk { .. } | Self::AvellanedaStoikov { .. } => None,
             Self::RegimeAdaptiveVolatilityAware { normal_vol, .. } => Some(normal_vol.skew_coeff),
         }
@@ -169,7 +193,9 @@ impl SweepStrategyParams {
 
     pub fn volatility_coeff(&self) -> Option<f64> {
         match self {
-            Self::FixedSpread { .. } | Self::AvellanedaStoikov { .. } => None,
+            Self::FixedSpread { .. }
+            | Self::AvellanedaStoikov { .. }
+            | Self::RuleBasedController { .. } => None,
             Self::VolatilityAware {
                 volatility_coeff, ..
             }
@@ -190,7 +216,8 @@ impl SweepStrategyParams {
     pub fn risk_aversion(&self) -> Option<f64> {
         match self {
             Self::InventoryRisk { risk_aversion, .. }
-            | Self::AvellanedaStoikov { risk_aversion, .. } => Some(*risk_aversion),
+            | Self::AvellanedaStoikov { risk_aversion, .. }
+            | Self::RuleBasedController { risk_aversion, .. } => Some(*risk_aversion),
             Self::FixedSpread { .. }
             | Self::VolatilityAware { .. }
             | Self::RegimeAdaptiveVolatilityAware { .. } => None,
@@ -200,6 +227,9 @@ impl SweepStrategyParams {
     pub fn liquidity_depth(&self) -> Option<f64> {
         match self {
             Self::AvellanedaStoikov {
+                liquidity_depth, ..
+            }
+            | Self::RuleBasedController {
                 liquidity_depth, ..
             } => Some(*liquidity_depth),
             Self::FixedSpread { .. }
@@ -211,10 +241,25 @@ impl SweepStrategyParams {
 
     pub fn horizon(&self) -> Option<f64> {
         match self {
-            Self::AvellanedaStoikov { horizon, .. } => Some(*horizon),
+            Self::AvellanedaStoikov { horizon, .. } | Self::RuleBasedController { horizon, .. } => {
+                Some(*horizon)
+            }
             Self::FixedSpread { .. }
             | Self::VolatilityAware { .. }
             | Self::InventoryRisk { .. }
+            | Self::RegimeAdaptiveVolatilityAware { .. } => None,
+        }
+    }
+
+    pub fn inventory_limit(&self) -> Option<f64> {
+        match self {
+            Self::RuleBasedController {
+                inventory_limit, ..
+            } => Some(*inventory_limit),
+            Self::FixedSpread { .. }
+            | Self::VolatilityAware { .. }
+            | Self::InventoryRisk { .. }
+            | Self::AvellanedaStoikov { .. }
             | Self::RegimeAdaptiveVolatilityAware { .. } => None,
         }
     }
@@ -225,6 +270,7 @@ impl SweepStrategyParams {
             Self::VolatilityAware { .. } => "volatility_aware",
             Self::InventoryRisk { .. } => "inventory_risk",
             Self::AvellanedaStoikov { .. } => "avellaneda_stoikov",
+            Self::RuleBasedController { .. } => "rule_based_controller",
             Self::RegimeAdaptiveVolatilityAware { .. } => "regime_adaptive_volatility_aware",
         }
     }
@@ -243,6 +289,7 @@ impl SweepStrategyParams {
             Self::FixedSpread { .. }
             | Self::VolatilityAware { .. }
             | Self::AvellanedaStoikov { .. }
+            | Self::RuleBasedController { .. }
             | Self::InventoryRisk { .. } => None,
         }
     }
@@ -286,6 +333,28 @@ impl QuoteStrategy for SweepStrategyParams {
                 liquidity_depth: *liquidity_depth,
                 horizon: *horizon,
                 min_spread: *min_spread,
+            }
+            .quote(state, context),
+            Self::RuleBasedController {
+                fixed_spread,
+                fixed_skew_coeff,
+                risk_aversion,
+                liquidity_depth,
+                horizon,
+                min_spread,
+                inventory_limit,
+            } => RuleBasedControllerParams {
+                fixed_spread: StrategyParams {
+                    spread: *fixed_spread,
+                    skew_coeff: *fixed_skew_coeff,
+                },
+                risk_managed: AvellanedaStoikovParams {
+                    risk_aversion: *risk_aversion,
+                    liquidity_depth: *liquidity_depth,
+                    horizon: *horizon,
+                    min_spread: *min_spread,
+                },
+                inventory_limit: *inventory_limit,
             }
             .quote(state, context),
             Self::RegimeAdaptiveVolatilityAware {
@@ -411,6 +480,27 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
             horizons,
             min_spreads,
         ),
+        StrategySweepConfig::RuleBasedController {
+            fixed_spreads,
+            fixed_skew_coeffs,
+            risk_aversions,
+            liquidity_depths,
+            horizons,
+            min_spreads,
+            inventory_limits,
+        } => run_rule_based_controller_sweep(
+            &config.simulation,
+            &seeds,
+            RuleBasedControllerGrid {
+                fixed_spreads,
+                fixed_skew_coeffs,
+                risk_aversions,
+                liquidity_depths,
+                horizons,
+                min_spreads,
+                inventory_limits,
+            },
+        ),
         StrategySweepConfig::RegimeAdaptiveVolatilityAware {
             low_vol,
             normal_vol,
@@ -437,7 +527,7 @@ pub fn run_parameter_sweep(config: SweepConfig) -> Vec<SweepResult> {
 
 pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
     let mut csv = String::from(
-        "rank,experiment,strategy_type,spread,volatility_coeff,risk_aversion,liquidity_depth,horizon,skew,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
+        "rank,experiment,strategy_type,spread,volatility_coeff,risk_aversion,liquidity_depth,horizon,inventory_limit,skew,runs,score,score_std,stable_score,inactivity_penalty,avg_final_pnl,final_pnl_std,avg_min_pnl,\
          avg_max_pnl,avg_max_drawdown,avg_final_inventory,avg_max_abs_inventory,\
          max_drawdown_std,avg_abs_inventory,avg_total_fills,avg_buy_fills,avg_sell_fills,avg_traded_quantity,\
          avg_traded_notional,avg_total_fees,avg_total_adverse_selection,avg_low_vol_steps,avg_normal_vol_steps,avg_high_vol_steps,\
@@ -457,6 +547,7 @@ pub fn sweep_results_to_csv(results: &[SweepResult]) -> String {
             optional_f64(result.strategy.risk_aversion()),
             optional_f64(result.strategy.liquidity_depth()),
             optional_f64(result.strategy.horizon()),
+            optional_f64(result.strategy.inventory_limit()),
             optional_f64(result.representative_skew_coeff()),
             result.runs.to_string(),
             format_f64(result.score),
@@ -794,6 +885,81 @@ fn run_avellaneda_stoikov_sweep(
 
                     if let Some(result) = aggregate_reports(name, sweep_strategy, &reports) {
                         results.push(result);
+                    }
+                }
+            }
+        }
+    }
+
+    results
+}
+
+struct RuleBasedControllerGrid<'a> {
+    fixed_spreads: &'a [f64],
+    fixed_skew_coeffs: &'a [f64],
+    risk_aversions: &'a [f64],
+    liquidity_depths: &'a [f64],
+    horizons: &'a [f64],
+    min_spreads: &'a [f64],
+    inventory_limits: &'a [f64],
+}
+
+fn run_rule_based_controller_sweep(
+    simulation: &SimulationConfig,
+    seeds: &[u64],
+    grid: RuleBasedControllerGrid<'_>,
+) -> Vec<SweepResult> {
+    let capacity = grid.fixed_spreads.len()
+        * grid.fixed_skew_coeffs.len()
+        * grid.risk_aversions.len()
+        * grid.liquidity_depths.len()
+        * grid.horizons.len()
+        * grid.min_spreads.len()
+        * grid.inventory_limits.len();
+    let mut results = Vec::with_capacity(capacity);
+
+    for fixed_spread in grid.fixed_spreads {
+        for fixed_skew_coeff in grid.fixed_skew_coeffs {
+            for risk_aversion in grid.risk_aversions {
+                for liquidity_depth in grid.liquidity_depths {
+                    for horizon in grid.horizons {
+                        for min_spread in grid.min_spreads {
+                            for inventory_limit in grid.inventory_limits {
+                                let strategy = RuleBasedControllerParams {
+                                    fixed_spread: StrategyParams {
+                                        spread: *fixed_spread,
+                                        skew_coeff: *fixed_skew_coeff,
+                                    },
+                                    risk_managed: AvellanedaStoikovParams {
+                                        risk_aversion: *risk_aversion,
+                                        liquidity_depth: *liquidity_depth,
+                                        horizon: *horizon,
+                                        min_spread: *min_spread,
+                                    },
+                                    inventory_limit: *inventory_limit,
+                                };
+                                let name = format!(
+                                    "fixed_{fixed_spread:.2}_skew_{fixed_skew_coeff:.2}_risk_{risk_aversion:.2}_depth_{liquidity_depth:.2}_horizon_{horizon:.2}_limit_{inventory_limit:.2}"
+                                );
+                                let reports =
+                                    run_seeded_reports(simulation, seeds, &name, &strategy);
+                                let sweep_strategy = SweepStrategyParams::RuleBasedController {
+                                    fixed_spread: *fixed_spread,
+                                    fixed_skew_coeff: *fixed_skew_coeff,
+                                    risk_aversion: *risk_aversion,
+                                    liquidity_depth: *liquidity_depth,
+                                    horizon: *horizon,
+                                    min_spread: *min_spread,
+                                    inventory_limit: *inventory_limit,
+                                };
+
+                                if let Some(result) =
+                                    aggregate_reports(name, sweep_strategy, &reports)
+                                {
+                                    results.push(result);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1142,6 +1308,40 @@ mod tests {
             results
                 .iter()
                 .all(|result| result.strategy.liquidity_depth().is_some())
+        );
+    }
+
+    #[test]
+    fn rule_based_controller_sweep_runs_each_parameter_combination() {
+        let results = run_parameter_sweep(SweepConfig {
+            name: None,
+            simulation: SimulationConfig {
+                steps: 100,
+                ..SimulationConfig::default()
+            },
+            seeds: vec![1],
+            strategy: StrategySweepConfig::RuleBasedController {
+                fixed_spreads: vec![0.5],
+                fixed_skew_coeffs: vec![0.05, 0.1],
+                risk_aversions: vec![0.1],
+                liquidity_depths: vec![4.0, 6.0],
+                horizons: vec![5.0],
+                min_spreads: vec![0.1],
+                inventory_limits: vec![3.0, 5.0],
+            },
+            scoring: ScoringConfig::default(),
+        });
+
+        assert_eq!(results.len(), 8);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.strategy.strategy_type() == "rule_based_controller")
+        );
+        assert!(
+            results
+                .iter()
+                .all(|result| result.strategy.inventory_limit().is_some())
         );
     }
 

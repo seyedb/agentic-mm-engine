@@ -16,6 +16,7 @@ DEFAULT_CONFIGS = [
     Path("configs/mixed_regime_fixed_spread_sweep.json"),
     Path("configs/mixed_regime_volatility_aware_sweep.json"),
     Path("configs/mixed_regime_inventory_risk_sweep.json"),
+    Path("configs/mixed_regime_rule_based_controller_sweep.json"),
     Path("configs/mixed_regime_adaptive_sweep.json"),
     Path("configs/mixed_regime_avellaneda_stoikov_sweep.json"),
 ]
@@ -49,6 +50,7 @@ class BestStrategy:
     risk_aversion: str
     liquidity_depth: str
     horizon: str
+    inventory_limit: str
     skew: str
     runs: int
     stable_score: float
@@ -160,6 +162,7 @@ def read_best(path: Path) -> BestStrategy:
         risk_aversion=optional_value(row, "risk_aversion"),
         liquidity_depth=optional_value(row, "liquidity_depth"),
         horizon=optional_value(row, "horizon"),
+        inventory_limit=optional_value(row, "inventory_limit"),
         skew=optional_value(row, "skew"),
         runs=parse_int(row["runs"], "runs"),
         stable_score=parse_float(row["stable_score"], "stable_score"),
@@ -194,6 +197,7 @@ def write_comparison(rows: list[BestStrategy], path: Path) -> None:
                 "risk_aversion",
                 "liquidity_depth",
                 "horizon",
+                "inventory_limit",
                 "skew",
                 "runs",
                 "stable_score",
@@ -218,6 +222,7 @@ def write_comparison(rows: list[BestStrategy], path: Path) -> None:
                     row.risk_aversion,
                     row.liquidity_depth,
                     row.horizon,
+                    row.inventory_limit,
                     row.skew,
                     row.runs,
                     format_number(row.stable_score),

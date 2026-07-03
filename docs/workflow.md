@@ -108,7 +108,7 @@ Run the shared mixed-regime strategy comparison:
 python3 research/compare_strategy_sweeps.py
 ```
 
-This runs the mixed-regime fixed-spread, volatility-aware, inventory-risk, regime-adaptive, and Avellaneda-Stoikov sweeps, then writes:
+This runs the mixed-regime fixed-spread, volatility-aware, inventory-risk, rule-based controller, regime-adaptive, and Avellaneda-Stoikov sweeps, then writes:
 
 ```text
 target/research/strategy_comparison.csv

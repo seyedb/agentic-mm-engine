@@ -11,7 +11,7 @@ The long-term goal is an agentic market maker: a system where a controller can o
 
 ### What It Does
 
-- Simulates fixed-spread, volatility-aware, inventory-risk, regime-adaptive, and Avellaneda-Stoikov strategies.
+- Simulates fixed-spread, volatility-aware, inventory-risk, rule-based controller, regime-adaptive, and Avellaneda-Stoikov strategies.
 - Models fills, fees, adverse selection, inventory, cash, and mark-to-market PnL.
 - Runs configurable multi-seed parameter sweeps.
 - Aggregates sweep results across multiple random seeds.
