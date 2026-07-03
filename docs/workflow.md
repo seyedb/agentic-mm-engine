@@ -51,6 +51,28 @@ Kraken OHLC responses are subject to the exchange's public history limits.
 
 ## Run A Replay Sweep
 
+Prefer a committed run config for reproducible replay work:
+
+```bash
+cargo run -- run configs/runs/sample_replay_sweep.json
+```
+
+Run configs keep long parameter lists out of the command line:
+
+```json
+{
+  "type": "replay_sweep",
+  "data": "data/sample_events.csv",
+  "seeds": [42, 43, 44, 45, 46],
+  "spreads": [0.2, 0.5, 1.0],
+  "skews": [0.0, 0.02, 0.05],
+  "quantities": [0.05, 0.1, 0.2],
+  "fee_rate": 0.001
+}
+```
+
+The flag-based command is still available for quick experiments:
+
 ```bash
 cargo run -- replay-sweep data/kraken_solusd_events.csv \
   --seeds 42,43,44,45,46 \

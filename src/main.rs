@@ -6,9 +6,11 @@ use mm_engine::engine::simulation::{
 use mm_engine::market::{InMemoryMarketData, MarketEvent, market_events_from_csv};
 use mm_engine::strategy::market_maker::StrategyParams;
 use mm_engine::sweep::{SweepConfig, SweepResult, run_parameter_sweep, sweep_results_to_csv};
+use serde::Deserialize;
 use std::env;
 use std::error::Error;
 use std::fs;
+use std::io::{Error as IoError, ErrorKind};
 use std::path::{Path, PathBuf};
 
 const DEFAULT_CONFIG_PATH: &str = "configs/baseline_sweep.json";
@@ -52,6 +54,9 @@ const REGIME_SUMMARY_HEADER: &[&str] = &[
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "run") {
+        return run_configured_command(&args);
+    }
     if args.first().is_some_and(|arg| arg == "replay") {
         return run_replay_command(&args);
     }
@@ -109,7 +114,10 @@ fn config_paths_from_args(args: &[String]) -> Vec<PathBuf> {
 
 fn run_replay_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     let options = ReplayOptions::parse(args)?;
+    run_replay_options(options)
+}
 
+fn run_replay_options(options: ReplayOptions) -> Result<(), Box<dyn Error>> {
     let events = market_events_from_csv(&options.path)?;
     if events.is_empty() {
         return Err("replay CSV contains no events".into());
@@ -138,6 +146,213 @@ fn run_replay_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     println!("wrote {}", step_dataset_path.display());
 
     Ok(())
+}
+
+fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
+    if args.len() != 2 {
+        return Err(run_usage().into());
+    }
+
+    match load_run_spec(Path::new(&args[1]))? {
+        RunSpec::Replay {
+            data,
+            spread,
+            skew,
+            quantity,
+            fee_rate,
+        } => run_replay_options(ReplayOptions {
+            path: data,
+            spread,
+            skew,
+            quantity,
+            fee_rate,
+        }),
+        RunSpec::ReplaySweep {
+            data,
+            seeds,
+            spreads,
+            skews,
+            quantities,
+            fee_rate,
+        } => run_replay_sweep_options(ReplaySweepOptions {
+            path: data,
+            seeds,
+            spreads,
+            skews,
+            quantities,
+            fee_rate,
+        }),
+    }
+}
+
+fn run_usage() -> String {
+    "usage: cargo run -- run <run_config.json>".to_string()
+}
+
+fn load_run_spec(path: &Path) -> Result<RunSpec, Box<dyn Error>> {
+    let contents = fs::read_to_string(path)?;
+    let spec = parse_run_spec(&contents)?;
+
+    Ok(spec)
+}
+
+fn parse_run_spec(contents: &str) -> Result<RunSpec, Box<dyn Error>> {
+    let spec: RunSpec = serde_json::from_str(contents)?;
+    spec.validate()
+        .map_err(|error| IoError::new(ErrorKind::InvalidInput, error))?;
+
+    Ok(spec)
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "type")]
+enum RunSpec {
+    #[serde(rename = "replay")]
+    Replay {
+        data: String,
+        #[serde(default = "default_replay_spread")]
+        spread: f64,
+        #[serde(default = "default_replay_skew")]
+        skew: f64,
+        #[serde(default = "default_order_quantity")]
+        quantity: f64,
+        #[serde(default = "default_fee_rate")]
+        fee_rate: f64,
+    },
+    #[serde(rename = "replay_sweep")]
+    ReplaySweep {
+        data: String,
+        #[serde(default = "default_replay_sweep_seeds")]
+        seeds: Vec<u64>,
+        #[serde(default = "default_replay_sweep_spreads")]
+        spreads: Vec<f64>,
+        #[serde(default = "default_replay_sweep_skews")]
+        skews: Vec<f64>,
+        #[serde(default = "default_replay_sweep_quantities")]
+        quantities: Vec<f64>,
+        #[serde(default = "default_fee_rate")]
+        fee_rate: f64,
+    },
+}
+
+impl RunSpec {
+    fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Replay {
+                data,
+                spread,
+                skew,
+                quantity,
+                fee_rate,
+            } => {
+                validate_data_path(data)?;
+                validate_positive_f64("spread", *spread)?;
+                validate_non_negative_f64("skew", *skew)?;
+                validate_positive_f64("quantity", *quantity)?;
+                validate_non_negative_f64("fee_rate", *fee_rate)?;
+            }
+            Self::ReplaySweep {
+                data,
+                seeds,
+                spreads,
+                skews,
+                quantities,
+                fee_rate,
+            } => {
+                validate_data_path(data)?;
+                validate_non_empty("seeds", seeds)?;
+                validate_non_empty("spreads", spreads)?;
+                validate_non_empty("skews", skews)?;
+                validate_non_empty("quantities", quantities)?;
+                for spread in spreads {
+                    validate_positive_f64("spreads", *spread)?;
+                }
+                for skew in skews {
+                    validate_non_negative_f64("skews", *skew)?;
+                }
+                for quantity in quantities {
+                    validate_positive_f64("quantities", *quantity)?;
+                }
+                validate_non_negative_f64("fee_rate", *fee_rate)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn default_replay_spread() -> f64 {
+    0.5
+}
+
+fn default_replay_skew() -> f64 {
+    0.05
+}
+
+fn default_order_quantity() -> f64 {
+    SimulationConfig::default().order_quantity
+}
+
+fn default_fee_rate() -> f64 {
+    SimulationConfig::default().fee_rate
+}
+
+fn default_replay_sweep_seeds() -> Vec<u64> {
+    vec![SimulationConfig::default().seed]
+}
+
+fn default_replay_sweep_spreads() -> Vec<f64> {
+    vec![0.2, 0.5, 1.0]
+}
+
+fn default_replay_sweep_skews() -> Vec<f64> {
+    vec![0.0, 0.02, 0.05]
+}
+
+fn default_replay_sweep_quantities() -> Vec<f64> {
+    vec![0.05, 0.1, 0.2]
+}
+
+fn validate_data_path(value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        Err("data must not be empty".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_non_empty<T>(name: &str, values: &[T]) -> Result<(), String> {
+    if values.is_empty() {
+        Err(format!("{name} must contain at least one value"))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_positive_f64(name: &str, value: f64) -> Result<(), String> {
+    validate_finite_f64(name, value)?;
+    if value <= 0.0 {
+        return Err(format!("{name} must be positive"));
+    }
+
+    Ok(())
+}
+
+fn validate_non_negative_f64(name: &str, value: f64) -> Result<(), String> {
+    validate_finite_f64(name, value)?;
+    if value < 0.0 {
+        return Err(format!("{name} must be non-negative"));
+    }
+
+    Ok(())
+}
+
+fn validate_finite_f64(name: &str, value: f64) -> Result<(), String> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(format!("{name} must be finite"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -266,7 +481,10 @@ fn replay_step_dataset_to_csv(name: &str, seed: u64, result: &SimulationResult) 
 
 fn run_replay_sweep_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     let options = ReplaySweepOptions::parse(args)?;
+    run_replay_sweep_options(options)
+}
 
+fn run_replay_sweep_options(options: ReplaySweepOptions) -> Result<(), Box<dyn Error>> {
     let events = market_events_from_csv(&options.path)?;
     if events.is_empty() {
         return Err("replay CSV contains no events".into());
@@ -958,6 +1176,70 @@ mod tests {
 
     fn replay_args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn run_spec_replay_uses_defaults() {
+        let spec = parse_run_spec(
+            r#"{
+              "type": "replay",
+              "data": "data/sample_events.csv"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            spec,
+            RunSpec::Replay {
+                data: "data/sample_events.csv".to_string(),
+                spread: 0.5,
+                skew: 0.05,
+                quantity: SimulationConfig::default().order_quantity,
+                fee_rate: SimulationConfig::default().fee_rate,
+            }
+        );
+    }
+
+    #[test]
+    fn run_spec_replay_sweep_parses_grid() {
+        let spec = parse_run_spec(
+            r#"{
+              "type": "replay_sweep",
+              "data": "data/sample_events.csv",
+              "seeds": [42, 43],
+              "spreads": [0.2, 0.5],
+              "skews": [0.0],
+              "quantities": [0.1],
+              "fee_rate": 0.001
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            spec,
+            RunSpec::ReplaySweep {
+                data: "data/sample_events.csv".to_string(),
+                seeds: vec![42, 43],
+                spreads: vec![0.2, 0.5],
+                skews: vec![0.0],
+                quantities: vec![0.1],
+                fee_rate: 0.001,
+            }
+        );
+    }
+
+    #[test]
+    fn run_spec_rejects_invalid_values() {
+        let error = parse_run_spec(
+            r#"{
+              "type": "replay_sweep",
+              "data": "data/sample_events.csv",
+              "spreads": []
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("spreads must contain"));
     }
 
     #[test]

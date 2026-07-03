@@ -1,0 +1,8 @@
+{
+  "type": "replay",
+  "data": "data/sample_events.csv",
+  "spread": 0.5,
+  "skew": 0.05,
+  "quantity": 0.1,
+  "fee_rate": 0.001
+}

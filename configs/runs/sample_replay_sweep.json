@@ -1,0 +1,9 @@
+{
+  "type": "replay_sweep",
+  "data": "data/sample_events.csv",
+  "seeds": [42, 43, 44, 45, 46],
+  "spreads": [0.2, 0.5, 1.0],
+  "skews": [0.0, 0.02, 0.05],
+  "quantities": [0.05, 0.1, 0.2],
+  "fee_rate": 0.001
+}

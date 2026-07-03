@@ -21,6 +21,8 @@ The long-term goal is an agentic market maker: a system where a controller can o
 
 ```bash
 cargo run
+cargo run -- run configs/runs/sample_replay.json
+cargo run -- run configs/runs/sample_replay_sweep.json
 cargo run -- replay data/sample_events.csv
 cargo run -- replay-sweep data/sample_events.csv
 cargo run -- configs/mixed_regime_adaptive_sweep.json
@@ -34,8 +36,13 @@ Fetch recent public candle data for replay:
 
 ```bash
 python3 research/fetch_public_events.py --pair SOLUSD --bars 120 --out data/kraken_solusd_events.csv
-cargo run -- replay data/kraken_solusd_events.csv --spread 0.5 --skew 0.05 --quantity 0.1 --fee-rate 0.001
-cargo run -- replay-sweep data/kraken_solusd_events.csv --seeds 42,43,44,45,46 --spreads 0.2,0.5,1.0 --skews 0.0,0.02,0.05 --quantities 0.05,0.1,0.2 --fee-rate 0.001
+```
+
+Run configs live in `configs/runs/`. Set the `data` field to the CSV you want to replay, then run:
+
+```bash
+cargo run -- run configs/runs/sample_replay.json
+cargo run -- run configs/runs/sample_replay_sweep.json
 ```
 
 Run the research checks after generating reports:
