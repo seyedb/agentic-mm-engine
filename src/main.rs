@@ -1,9 +1,12 @@
+use mm_engine::agent::RuleBasedControllerParams;
 use mm_engine::engine::dataset::{append_step_dataset_rows, step_dataset_header};
 use mm_engine::engine::metrics::SimulationMetrics;
 use mm_engine::engine::simulation::{
-    FillModelConfig, SimulationConfig, SimulationResult, run_replay_simulation, run_simulation,
+    FillModelConfig, RegimeConfig, SimulationConfig, SimulationResult, run_replay_simulation,
+    run_simulation,
 };
 use mm_engine::market::{InMemoryMarketData, MarketEvent, market_events_from_csv};
+use mm_engine::paper::{PaperSessionConfig, paper_session_to_csv, run_paper_session};
 use mm_engine::strategy::market_maker::StrategyParams;
 use mm_engine::sweep::{SweepConfig, SweepResult, run_parameter_sweep, sweep_results_to_csv};
 use serde::Deserialize;
@@ -182,6 +185,23 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             quantities,
             fee_rate,
         }),
+        RunSpec::PaperSession {
+            data,
+            output,
+            controller,
+            quantity,
+            fee_rate,
+            volatility_window,
+            regime,
+        } => run_paper_session_options(PaperSessionOptions {
+            path: data,
+            output,
+            controller,
+            quantity,
+            fee_rate,
+            volatility_window,
+            regime,
+        }),
     }
 }
 
@@ -233,6 +253,21 @@ enum RunSpec {
         #[serde(default = "default_fee_rate")]
         fee_rate: f64,
     },
+    #[serde(rename = "paper_session")]
+    PaperSession {
+        data: String,
+        #[serde(default)]
+        output: Option<String>,
+        controller: RuleBasedControllerParams,
+        #[serde(default = "default_order_quantity")]
+        quantity: f64,
+        #[serde(default = "default_fee_rate")]
+        fee_rate: f64,
+        #[serde(default = "default_volatility_window")]
+        volatility_window: usize,
+        #[serde(default)]
+        regime: RegimeConfig,
+    },
 }
 
 impl RunSpec {
@@ -275,6 +310,23 @@ impl RunSpec {
                 }
                 validate_non_negative_f64("fee_rate", *fee_rate)?;
             }
+            Self::PaperSession {
+                data,
+                output,
+                controller,
+                quantity,
+                fee_rate,
+                volatility_window: _,
+                regime: _,
+            } => {
+                validate_data_path(data)?;
+                if let Some(output) = output {
+                    validate_data_path(output)?;
+                }
+                validate_controller(controller)?;
+                validate_positive_f64("quantity", *quantity)?;
+                validate_non_negative_f64("fee_rate", *fee_rate)?;
+            }
         }
 
         Ok(())
@@ -295,6 +347,10 @@ fn default_order_quantity() -> f64 {
 
 fn default_fee_rate() -> f64 {
     SimulationConfig::default().fee_rate
+}
+
+fn default_volatility_window() -> usize {
+    SimulationConfig::default().volatility_window
 }
 
 fn default_replay_sweep_seeds() -> Vec<u64> {
@@ -353,6 +409,119 @@ fn validate_finite_f64(name: &str, value: f64) -> Result<(), String> {
     } else {
         Err(format!("{name} must be finite"))
     }
+}
+
+fn validate_controller(controller: &RuleBasedControllerParams) -> Result<(), String> {
+    validate_positive_f64(
+        "controller.fixed_spread.spread",
+        controller.fixed_spread.spread,
+    )?;
+    validate_non_negative_f64(
+        "controller.fixed_spread.skew_coeff",
+        controller.fixed_spread.skew_coeff,
+    )?;
+    validate_non_negative_f64(
+        "controller.risk_managed.risk_aversion",
+        controller.risk_managed.risk_aversion,
+    )?;
+    validate_positive_f64(
+        "controller.risk_managed.liquidity_depth",
+        controller.risk_managed.liquidity_depth,
+    )?;
+    validate_non_negative_f64(
+        "controller.risk_managed.horizon",
+        controller.risk_managed.horizon,
+    )?;
+    validate_non_negative_f64(
+        "controller.risk_managed.min_spread",
+        controller.risk_managed.min_spread,
+    )?;
+    validate_non_negative_f64("controller.inventory_limit", controller.inventory_limit)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PaperSessionOptions {
+    path: String,
+    output: Option<String>,
+    controller: RuleBasedControllerParams,
+    quantity: f64,
+    fee_rate: f64,
+    volatility_window: usize,
+    regime: RegimeConfig,
+}
+
+fn run_paper_session_options(options: PaperSessionOptions) -> Result<(), Box<dyn Error>> {
+    let events = market_events_from_csv(&options.path)?;
+    if events.is_empty() {
+        return Err("paper session CSV contains no events".into());
+    }
+
+    let result = run_paper_session(
+        &events,
+        &options.controller,
+        PaperSessionConfig {
+            order_quantity: options.quantity,
+            fee_rate: options.fee_rate,
+            volatility_window: options.volatility_window,
+            regime: options.regime,
+        },
+    );
+    let output_path = options
+        .output
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new("target").join("reports").join(format!(
+                "{}_paper_session.csv",
+                file_stem(Path::new(&options.path))
+            ))
+        });
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).expect("failed to create paper session output directory");
+    }
+    fs::write(&output_path, paper_session_to_csv(&result))
+        .expect("failed to write paper session CSV");
+
+    print_paper_session_results(&options, &result);
+    println!("wrote {}", output_path.display());
+
+    Ok(())
+}
+
+fn print_paper_session_results(
+    options: &PaperSessionOptions,
+    result: &mm_engine::paper::PaperSessionResult,
+) {
+    println!("Paper session results");
+    println!("data: {}", options.path);
+    println!("quantity: {:.4}", options.quantity);
+    println!("fee_rate: {:.6}", options.fee_rate);
+    println!("steps: {}", result.rows.len());
+
+    let Some(final_row) = result.final_row() else {
+        return;
+    };
+
+    let total_fills: usize = result.rows.iter().map(|row| row.fills).sum();
+    let total_fees: f64 = result.rows.iter().map(|row| row.fees).sum();
+    let max_drawdown = result
+        .rows
+        .iter()
+        .map(|row| row.drawdown)
+        .fold(0.0, f64::max);
+    let risk_managed_steps = result
+        .rows
+        .iter()
+        .filter(|row| row.agent_mode == mm_engine::agent::ControllerMode::RiskManaged)
+        .count();
+
+    println!("risk_managed_steps: {}", risk_managed_steps);
+    println!("fills: {}", total_fills);
+    println!("final_pnl: {:.2}", final_row.pnl);
+    println!("final_inventory: {:.2}", final_row.inventory);
+    println!("fees: {:.2}", total_fees);
+    println!("max_drawdown: {:.2}", max_drawdown);
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1226,6 +1395,50 @@ mod tests {
                 fee_rate: 0.001,
             }
         );
+    }
+
+    #[test]
+    fn run_spec_paper_session_parses_controller() {
+        let spec = parse_run_spec(
+            r#"{
+              "type": "paper_session",
+              "data": "data/sample_events.csv",
+              "controller": {
+                "fixed_spread": {
+                  "spread": 0.5,
+                  "skew_coeff": 0.05
+                },
+                "risk_managed": {
+                  "risk_aversion": 0.2,
+                  "liquidity_depth": 4.0,
+                  "horizon": 10.0,
+                  "min_spread": 0.1
+                },
+                "inventory_limit": 4.0
+              },
+              "quantity": 0.1,
+              "fee_rate": 0.001
+            }"#,
+        )
+        .unwrap();
+
+        match spec {
+            RunSpec::PaperSession {
+                data,
+                controller,
+                quantity,
+                fee_rate,
+                ..
+            } => {
+                assert_eq!(data, "data/sample_events.csv");
+                assert_eq!(controller.fixed_spread.spread, 0.5);
+                assert_eq!(controller.risk_managed.risk_aversion, 0.2);
+                assert_eq!(controller.inventory_limit, 4.0);
+                assert_eq!(quantity, 0.1);
+                assert_eq!(fee_rate, 0.001);
+            }
+            _ => panic!("expected paper session run spec"),
+        }
     }
 
     #[test]

@@ -39,4 +39,5 @@ Replay run specs live under `configs/runs/` and use the `run` command:
 ```bash
 cargo run -- run configs/runs/sample_replay.json
 cargo run -- run configs/runs/sample_replay_sweep.json
+cargo run -- run configs/runs/sample_paper_session.json
 ```

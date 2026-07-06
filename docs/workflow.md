@@ -137,3 +137,13 @@ target/research/strategy_comparison.csv
 ```
 
 Use `--skip-run` to compare existing report CSVs without rerunning the Rust sweeps.
+
+## Run A Paper Session
+
+Paper sessions replay public market events through a controller and write first-class decision logs:
+
+```bash
+cargo run -- run configs/runs/sample_paper_session.json
+```
+
+The output CSV records the observed market state, controller mode, quote, fills, inventory, PnL, and drawdown at each step.

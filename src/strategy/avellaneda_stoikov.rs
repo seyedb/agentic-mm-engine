@@ -4,7 +4,7 @@ use crate::engine::state::SystemState;
 use crate::market::Quote;
 use crate::strategy::{QuoteStrategy, StrategyContext};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AvellanedaStoikovParams {
     pub risk_aversion: f64,
     pub liquidity_depth: f64,

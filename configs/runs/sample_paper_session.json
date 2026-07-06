@@ -1,0 +1,21 @@
+{
+  "type": "paper_session",
+  "data": "data/sample_events.csv",
+  "output": "target/reports/sample_events_paper_session.csv",
+  "controller": {
+    "fixed_spread": {
+      "spread": 0.5,
+      "skew_coeff": 0.05
+    },
+    "risk_managed": {
+      "risk_aversion": 0.2,
+      "liquidity_depth": 4.0,
+      "horizon": 10.0,
+      "min_spread": 0.1
+    },
+    "inventory_limit": 4.0
+  },
+  "quantity": 0.1,
+  "fee_rate": 0.001,
+  "volatility_window": 50
+}

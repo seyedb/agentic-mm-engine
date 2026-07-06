@@ -23,6 +23,7 @@ The long-term goal is an agentic market maker: a system where a controller can o
 cargo run
 cargo run -- run configs/runs/sample_replay.json
 cargo run -- run configs/runs/sample_replay_sweep.json
+cargo run -- run configs/runs/sample_paper_session.json
 cargo run -- replay data/sample_events.csv
 cargo run -- replay-sweep data/sample_events.csv
 cargo run -- configs/mixed_regime_adaptive_sweep.json
@@ -43,6 +44,7 @@ Run configs live in `configs/runs/`. Set the `data` field to the CSV you want to
 ```bash
 cargo run -- run configs/runs/sample_replay.json
 cargo run -- run configs/runs/sample_replay_sweep.json
+cargo run -- run configs/runs/sample_paper_session.json
 ```
 
 Run the research checks after generating reports:

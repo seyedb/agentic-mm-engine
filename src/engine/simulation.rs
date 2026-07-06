@@ -65,7 +65,7 @@ pub enum FillModelConfig {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RegimeConfig {
     pub low_volatility_threshold: f64,
     pub high_volatility_threshold: f64,
@@ -89,7 +89,7 @@ pub enum MarketRegime {
 }
 
 impl MarketRegime {
-    fn classify(estimated_volatility: f64, config: RegimeConfig) -> Self {
+    pub fn classify(estimated_volatility: f64, config: RegimeConfig) -> Self {
         if estimated_volatility < config.low_volatility_threshold {
             Self::LowVol
         } else if estimated_volatility > config.high_volatility_threshold {

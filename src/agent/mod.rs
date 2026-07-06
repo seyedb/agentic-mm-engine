@@ -13,7 +13,7 @@ pub enum ControllerMode {
     RiskManaged,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AgentDecision {
     pub mode: ControllerMode,
     pub quote: Quote,
@@ -23,7 +23,7 @@ pub trait MarketMakingAgent {
     fn decide(&self, state: &SystemState, context: &StrategyContext) -> AgentDecision;
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RuleBasedControllerParams {
     pub fixed_spread: StrategyParams,
     pub risk_managed: AvellanedaStoikovParams,

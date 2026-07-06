@@ -3,7 +3,7 @@ use crate::market::Quote;
 use crate::strategy::{QuoteStrategy, StrategyContext};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StrategyParams {
     pub spread: f64,
     pub skew_coeff: f64,
