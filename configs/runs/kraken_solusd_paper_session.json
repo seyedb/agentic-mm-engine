@@ -17,5 +17,12 @@
   },
   "quantity": 0.1,
   "fee_rate": 0.001,
+  "seed": 42,
+  "fill_model": {
+    "type": "touch_intensity",
+    "base_intensity": 0.35,
+    "distance_decay": 160.0,
+    "volatility_boost": 1.0
+  },
   "volatility_window": 20
 }

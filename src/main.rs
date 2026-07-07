@@ -6,7 +6,9 @@ use mm_engine::engine::simulation::{
     run_simulation,
 };
 use mm_engine::market::{InMemoryMarketData, MarketEvent, market_events_from_csv};
-use mm_engine::paper::{PaperSessionConfig, paper_session_to_csv, run_paper_session};
+use mm_engine::paper::{
+    PaperFillModelConfig, PaperSessionConfig, paper_session_to_csv, run_paper_session,
+};
 use mm_engine::strategy::market_maker::StrategyParams;
 use mm_engine::sweep::{SweepConfig, SweepResult, run_parameter_sweep, sweep_results_to_csv};
 use serde::Deserialize;
@@ -191,6 +193,8 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             controller,
             quantity,
             fee_rate,
+            seed,
+            fill_model,
             volatility_window,
             regime,
         } => run_paper_session_options(PaperSessionOptions {
@@ -199,6 +203,8 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             controller,
             quantity,
             fee_rate,
+            seed,
+            fill_model,
             volatility_window,
             regime,
         }),
@@ -263,6 +269,10 @@ enum RunSpec {
         quantity: f64,
         #[serde(default = "default_fee_rate")]
         fee_rate: f64,
+        #[serde(default = "default_seed")]
+        seed: u64,
+        #[serde(default)]
+        fill_model: PaperFillModelConfig,
         #[serde(default = "default_volatility_window")]
         volatility_window: usize,
         #[serde(default)]
@@ -316,6 +326,8 @@ impl RunSpec {
                 controller,
                 quantity,
                 fee_rate,
+                seed: _,
+                fill_model,
                 volatility_window: _,
                 regime: _,
             } => {
@@ -326,6 +338,7 @@ impl RunSpec {
                 validate_controller(controller)?;
                 validate_positive_f64("quantity", *quantity)?;
                 validate_non_negative_f64("fee_rate", *fee_rate)?;
+                validate_paper_fill_model(*fill_model)?;
             }
         }
 
@@ -351,6 +364,10 @@ fn default_fee_rate() -> f64 {
 
 fn default_volatility_window() -> usize {
     SimulationConfig::default().volatility_window
+}
+
+fn default_seed() -> u64 {
+    SimulationConfig::default().seed
 }
 
 fn default_replay_sweep_seeds() -> Vec<u64> {
@@ -439,6 +456,21 @@ fn validate_controller(controller: &RuleBasedControllerParams) -> Result<(), Str
     validate_non_negative_f64("controller.inventory_limit", controller.inventory_limit)
 }
 
+fn validate_paper_fill_model(fill_model: PaperFillModelConfig) -> Result<(), String> {
+    match fill_model {
+        PaperFillModelConfig::Crossing => Ok(()),
+        PaperFillModelConfig::TouchIntensity {
+            base_intensity,
+            distance_decay,
+            volatility_boost,
+        } => {
+            validate_non_negative_f64("fill_model.base_intensity", base_intensity)?;
+            validate_non_negative_f64("fill_model.distance_decay", distance_decay)?;
+            validate_non_negative_f64("fill_model.volatility_boost", volatility_boost)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct PaperSessionOptions {
     path: String,
@@ -446,6 +478,8 @@ struct PaperSessionOptions {
     controller: RuleBasedControllerParams,
     quantity: f64,
     fee_rate: f64,
+    seed: u64,
+    fill_model: PaperFillModelConfig,
     volatility_window: usize,
     regime: RegimeConfig,
 }
@@ -462,6 +496,8 @@ fn run_paper_session_options(options: PaperSessionOptions) -> Result<(), Box<dyn
         PaperSessionConfig {
             order_quantity: options.quantity,
             fee_rate: options.fee_rate,
+            seed: options.seed,
+            fill_model: options.fill_model,
             volatility_window: options.volatility_window,
             regime: options.regime,
         },
@@ -497,6 +533,8 @@ fn print_paper_session_results(
     println!("data: {}", options.path);
     println!("quantity: {:.4}", options.quantity);
     println!("fee_rate: {:.6}", options.fee_rate);
+    println!("seed: {}", options.seed);
+    println!("fill_model: {:?}", options.fill_model);
     println!("steps: {}", result.rows.len());
 
     let Some(final_row) = result.final_row() else {
@@ -1417,7 +1455,14 @@ mod tests {
                 "inventory_limit": 4.0
               },
               "quantity": 0.1,
-              "fee_rate": 0.001
+              "fee_rate": 0.001,
+              "seed": 7,
+              "fill_model": {
+                "type": "touch_intensity",
+                "base_intensity": 0.5,
+                "distance_decay": 10.0,
+                "volatility_boost": 1.0
+              }
             }"#,
         )
         .unwrap();
@@ -1428,6 +1473,8 @@ mod tests {
                 controller,
                 quantity,
                 fee_rate,
+                seed,
+                fill_model,
                 ..
             } => {
                 assert_eq!(data, "data/sample_events.csv");
@@ -1436,6 +1483,15 @@ mod tests {
                 assert_eq!(controller.inventory_limit, 4.0);
                 assert_eq!(quantity, 0.1);
                 assert_eq!(fee_rate, 0.001);
+                assert_eq!(seed, 7);
+                assert_eq!(
+                    fill_model,
+                    PaperFillModelConfig::TouchIntensity {
+                        base_intensity: 0.5,
+                        distance_decay: 10.0,
+                        volatility_boost: 1.0,
+                    }
+                );
             }
             _ => panic!("expected paper session run spec"),
         }

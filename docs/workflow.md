@@ -143,13 +143,26 @@ Use `--skip-run` to compare existing report CSVs without rerunning the Rust swee
 Paper sessions replay public market events through a controller and write first-class decision logs:
 
 ```bash
-cargo run -- run configs/runs/sample_paper_session.json
+cargo run -- run configs/runs/kraken_solusd_paper_session.json
 ```
 
 The output CSV records the observed market state, controller mode, quote, fills, inventory, PnL, and drawdown at each step.
+Use quote CSVs when you want paper fills from public top-of-book data; mid-only replay files can still record decisions, but they cannot produce observed quote fills.
 
 Analyze the session log:
 
 ```bash
-python3 research/analyze_paper_session.py target/reports/sample_events_paper_session.csv
+python3 research/analyze_paper_session.py target/reports/kraken_solusd_paper_session.csv
+```
+
+Render an interactive Plotly view of the session:
+
+```bash
+python3 research/plot_paper_session.py target/reports/kraken_solusd_paper_session.csv
+```
+
+The report is written to:
+
+```text
+target/research/kraken_solusd_paper_session.html
 ```

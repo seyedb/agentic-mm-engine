@@ -1,5 +1,7 @@
 use std::fmt::Write;
 
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{ControllerMode, MarketMakingAgent, RuleBasedControllerParams};
@@ -12,6 +14,9 @@ use crate::strategy::StrategyContext;
 pub struct PaperSessionConfig {
     pub order_quantity: f64,
     pub fee_rate: f64,
+    pub seed: u64,
+    #[serde(default)]
+    pub fill_model: PaperFillModelConfig,
     pub volatility_window: usize,
     #[serde(default)]
     pub regime: RegimeConfig,
@@ -22,10 +27,26 @@ impl Default for PaperSessionConfig {
         Self {
             order_quantity: 1.0,
             fee_rate: 0.001,
+            seed: 42,
+            fill_model: PaperFillModelConfig::default(),
             volatility_window: 50,
             regime: RegimeConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum PaperFillModelConfig {
+    #[serde(rename = "crossing")]
+    #[default]
+    Crossing,
+    #[serde(rename = "touch_intensity")]
+    TouchIntensity {
+        base_intensity: f64,
+        distance_decay: f64,
+        volatility_boost: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +93,7 @@ pub fn run_paper_session(
     let mut volatility = RollingVolatility::new(config.volatility_window);
     let mut rows = Vec::with_capacity(events.len());
     let mut peak_pnl = 0.0;
+    let mut rng = StdRng::seed_from_u64(config.seed);
 
     for event in events {
         let state = state.get_or_insert_with(|| SystemState::new(event.mid_price));
@@ -92,11 +114,14 @@ pub fn run_paper_session(
         let observed_quote = event_quote(*event);
         let fills = observed_quote
             .map(|quote| {
-                observed_quote_crossing_fills(
+                observed_quote_fills(
                     decision.quote,
                     quote,
+                    estimated_volatility,
+                    config.fill_model,
                     config.order_quantity,
                     config.fee_rate,
+                    &mut rng,
                 )
             })
             .unwrap_or_default();
@@ -219,6 +244,39 @@ fn event_quote(event: MarketEvent) -> Option<Quote> {
     })
 }
 
+fn observed_quote_fills(
+    quote: Quote,
+    observed_quote: Quote,
+    estimated_volatility: f64,
+    fill_model: PaperFillModelConfig,
+    quantity: f64,
+    fee_rate: f64,
+    rng: &mut StdRng,
+) -> Vec<Fill> {
+    match fill_model {
+        PaperFillModelConfig::Crossing => {
+            observed_quote_crossing_fills(quote, observed_quote, quantity, fee_rate)
+        }
+        PaperFillModelConfig::TouchIntensity {
+            base_intensity,
+            distance_decay,
+            volatility_boost,
+        } => observed_quote_touch_intensity_fills(
+            quote,
+            observed_quote,
+            estimated_volatility,
+            TouchIntensityParams {
+                base_intensity,
+                distance_decay,
+                volatility_boost,
+            },
+            quantity,
+            fee_rate,
+            rng,
+        ),
+    }
+}
+
 fn observed_quote_crossing_fills(
     quote: Quote,
     observed_quote: Quote,
@@ -238,6 +296,58 @@ fn observed_quote_crossing_fills(
     }
 
     fills
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TouchIntensityParams {
+    base_intensity: f64,
+    distance_decay: f64,
+    volatility_boost: f64,
+}
+
+fn observed_quote_touch_intensity_fills(
+    quote: Quote,
+    observed_quote: Quote,
+    estimated_volatility: f64,
+    params: TouchIntensityParams,
+    quantity: f64,
+    fee_rate: f64,
+    rng: &mut StdRng,
+) -> Vec<Fill> {
+    let mut fills = observed_quote_crossing_fills(quote, observed_quote, quantity, fee_rate);
+
+    if quote.bid < observed_quote.ask {
+        let bid_distance = (observed_quote.bid - quote.bid).max(0.0);
+        if rng.random::<f64>() < touch_fill_probability(bid_distance, estimated_volatility, params)
+        {
+            let fee = quote.bid * quantity * fee_rate;
+            fills.push(Fill::buy(quote.bid, quantity, fee));
+        }
+    }
+
+    if quote.ask > observed_quote.bid {
+        let ask_distance = (quote.ask - observed_quote.ask).max(0.0);
+        if rng.random::<f64>() < touch_fill_probability(ask_distance, estimated_volatility, params)
+        {
+            let fee = quote.ask * quantity * fee_rate;
+            fills.push(Fill::sell(quote.ask, quantity, fee));
+        }
+    }
+
+    fills
+}
+
+fn touch_fill_probability(
+    quote_distance: f64,
+    estimated_volatility: f64,
+    params: TouchIntensityParams,
+) -> f64 {
+    let volatility_multiplier = (1.0 + params.volatility_boost * estimated_volatility).max(0.0);
+    let probability = params.base_intensity
+        * (-params.distance_decay * quote_distance).exp()
+        * volatility_multiplier;
+
+    probability.clamp(0.0, 1.0)
 }
 
 struct RollingVolatility {
@@ -371,6 +481,30 @@ mod tests {
         assert_eq!(result.rows[0].buy_fills, 0);
         assert_eq!(result.rows[0].sell_fills, 0);
         assert_eq!(result.rows[0].fees, 0.0);
+    }
+
+    #[test]
+    fn paper_session_touch_intensity_can_fill_near_touch() {
+        let events = vec![MarketEvent::from_quote(1, 99.95, 100.05)];
+        let result = run_paper_session(
+            &events,
+            &agent(),
+            PaperSessionConfig {
+                order_quantity: 1.0,
+                fee_rate: 0.001,
+                fill_model: PaperFillModelConfig::TouchIntensity {
+                    base_intensity: 1.0,
+                    distance_decay: 0.0,
+                    volatility_boost: 0.0,
+                },
+                ..PaperSessionConfig::default()
+            },
+        );
+
+        assert_eq!(result.rows[0].fills, 2);
+        assert_eq!(result.rows[0].buy_fills, 1);
+        assert_eq!(result.rows[0].sell_fills, 1);
+        assert!(result.rows[0].fees > 0.0);
     }
 
     #[test]
