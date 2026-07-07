@@ -147,3 +147,9 @@ cargo run -- run configs/runs/sample_paper_session.json
 ```
 
 The output CSV records the observed market state, controller mode, quote, fills, inventory, PnL, and drawdown at each step.
+
+Analyze the session log:
+
+```bash
+python3 research/analyze_paper_session.py target/reports/sample_events_paper_session.csv
+```
