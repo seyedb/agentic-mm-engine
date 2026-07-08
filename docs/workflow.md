@@ -179,6 +179,15 @@ This does not place orders. It only records public quote snapshots, agent quotes
 The default live config keeps quoting active. Use `configs/runs/kraken_solusd_fee_aware_paper_live.json` to test the fee-aware spread floor separately.
 Use `configs/runs/kraken_solusd_maker_fee_paper_live.json` to test the same quoting logic under a lower passive maker-fee assumption.
 
+Compare paper-session config assumptions on the same quote replay:
+
+```bash
+python3 research/compare_paper_configs.py \
+  configs/runs/kraken_solusd_paper_session.json \
+  configs/runs/kraken_solusd_fee_aware_paper_session.json \
+  configs/runs/kraken_solusd_maker_fee_paper_session.json
+```
+
 Run the live session and produce the analysis plus Plotly report in one step:
 
 ```bash
