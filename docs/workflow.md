@@ -177,9 +177,10 @@ cargo run -- run configs/runs/kraken_solusd_paper_live.json
 
 This does not place orders. It only records public quote snapshots, agent quotes, paper fills, inventory, PnL, fees, and drawdown.
 
-Analyze and plot the live paper log the same way:
+Run the live session and produce the analysis plus Plotly report in one step:
 
 ```bash
-python3 research/analyze_paper_session.py target/reports/kraken_solusd_paper_live.csv
-python3 research/plot_paper_session.py target/reports/kraken_solusd_paper_live.csv
+python3 research/run_paper_live_report.py configs/runs/kraken_solusd_paper_live.json
 ```
+
+Use `--skip-run` to regenerate the analysis and Plotly report from an existing live CSV.
