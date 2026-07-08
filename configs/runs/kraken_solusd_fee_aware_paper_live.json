@@ -1,7 +1,7 @@
 {
-  "type": "paper_session",
-  "data": "data/kraken_solusd_quotes.csv",
-  "output": "target/reports/kraken_solusd_paper_session.csv",
+  "type": "paper_live",
+  "pair": "SOLUSD",
+  "output": "target/reports/kraken_solusd_fee_aware_paper_live.csv",
   "controller": {
     "fixed_spread": {
       "spread": 0.02,
@@ -17,6 +17,7 @@
   },
   "quantity": 0.1,
   "fee_rate": 0.001,
+  "fee_spread_multiplier": 1.0,
   "seed": 42,
   "fill_model": {
     "type": "touch_intensity",
@@ -24,5 +25,8 @@
     "distance_decay": 160.0,
     "volatility_boost": 1.0
   },
-  "volatility_window": 20
+  "volatility_window": 20,
+  "samples": 30,
+  "interval_seconds": 5.0,
+  "timeout_seconds": 10.0
 }
