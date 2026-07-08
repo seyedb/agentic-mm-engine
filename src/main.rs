@@ -194,6 +194,7 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             controller,
             quantity,
             fee_rate,
+            fee_spread_multiplier,
             seed,
             fill_model,
             volatility_window,
@@ -204,6 +205,7 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             controller,
             quantity,
             fee_rate,
+            fee_spread_multiplier,
             seed,
             fill_model,
             volatility_window,
@@ -215,6 +217,7 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             controller,
             quantity,
             fee_rate,
+            fee_spread_multiplier,
             seed,
             fill_model,
             volatility_window,
@@ -228,6 +231,7 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             controller,
             quantity,
             fee_rate,
+            fee_spread_multiplier,
             seed,
             fill_model,
             volatility_window,
@@ -298,6 +302,8 @@ enum RunSpec {
         quantity: f64,
         #[serde(default = "default_fee_rate")]
         fee_rate: f64,
+        #[serde(default)]
+        fee_spread_multiplier: f64,
         #[serde(default = "default_seed")]
         seed: u64,
         #[serde(default)]
@@ -317,6 +323,8 @@ enum RunSpec {
         quantity: f64,
         #[serde(default = "default_fee_rate")]
         fee_rate: f64,
+        #[serde(default)]
+        fee_spread_multiplier: f64,
         #[serde(default = "default_seed")]
         seed: u64,
         #[serde(default)]
@@ -380,6 +388,7 @@ impl RunSpec {
                 controller,
                 quantity,
                 fee_rate,
+                fee_spread_multiplier,
                 seed: _,
                 fill_model,
                 volatility_window: _,
@@ -392,6 +401,7 @@ impl RunSpec {
                 validate_controller(controller)?;
                 validate_positive_f64("quantity", *quantity)?;
                 validate_non_negative_f64("fee_rate", *fee_rate)?;
+                validate_non_negative_f64("fee_spread_multiplier", *fee_spread_multiplier)?;
                 validate_paper_fill_model(*fill_model)?;
             }
             Self::PaperLive {
@@ -400,6 +410,7 @@ impl RunSpec {
                 controller,
                 quantity,
                 fee_rate,
+                fee_spread_multiplier,
                 seed: _,
                 fill_model,
                 volatility_window: _,
@@ -415,6 +426,7 @@ impl RunSpec {
                 validate_controller(controller)?;
                 validate_positive_f64("quantity", *quantity)?;
                 validate_non_negative_f64("fee_rate", *fee_rate)?;
+                validate_non_negative_f64("fee_spread_multiplier", *fee_spread_multiplier)?;
                 validate_paper_fill_model(*fill_model)?;
                 validate_positive_usize("samples", *samples)?;
                 validate_non_negative_f64("interval_seconds", *interval_seconds)?;
@@ -590,6 +602,7 @@ struct PaperSessionOptions {
     controller: RuleBasedControllerParams,
     quantity: f64,
     fee_rate: f64,
+    fee_spread_multiplier: f64,
     seed: u64,
     fill_model: PaperFillModelConfig,
     volatility_window: usize,
@@ -608,6 +621,7 @@ fn run_paper_session_options(options: PaperSessionOptions) -> Result<(), Box<dyn
         PaperSessionConfig {
             order_quantity: options.quantity,
             fee_rate: options.fee_rate,
+            fee_spread_multiplier: options.fee_spread_multiplier,
             seed: options.seed,
             fill_model: options.fill_model,
             volatility_window: options.volatility_window,
@@ -645,6 +659,10 @@ fn print_paper_session_results(
     println!("data: {}", options.path);
     println!("quantity: {:.4}", options.quantity);
     println!("fee_rate: {:.6}", options.fee_rate);
+    println!(
+        "fee_spread_multiplier: {:.4}",
+        options.fee_spread_multiplier
+    );
     println!("seed: {}", options.seed);
     println!("fill_model: {:?}", options.fill_model);
     println!("steps: {}", result.rows.len());

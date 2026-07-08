@@ -176,6 +176,7 @@ cargo run -- run configs/runs/kraken_solusd_paper_live.json
 ```
 
 This does not place orders. It only records public quote snapshots, agent quotes, paper fills, inventory, PnL, fees, and drawdown.
+The default live config applies a fee-aware spread floor so quotes are not tighter than the estimated round-trip fee break-even spread.
 
 Run the live session and produce the analysis plus Plotly report in one step:
 

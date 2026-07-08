@@ -20,6 +20,7 @@ pub struct PaperLiveConfig {
     pub controller: RuleBasedControllerParams,
     pub quantity: f64,
     pub fee_rate: f64,
+    pub fee_spread_multiplier: f64,
     pub seed: u64,
     pub fill_model: PaperFillModelConfig,
     pub volatility_window: usize,
@@ -52,6 +53,7 @@ pub fn run_kraken_paper_live(config: PaperLiveConfig) -> Result<PathBuf, Box<dyn
     let mut runner = PaperSessionRunner::new(PaperSessionConfig {
         order_quantity: config.quantity,
         fee_rate: config.fee_rate,
+        fee_spread_multiplier: config.fee_spread_multiplier,
         seed: config.seed,
         fill_model: config.fill_model,
         volatility_window: config.volatility_window,
@@ -169,6 +171,7 @@ fn print_paper_live_results(config: &PaperLiveConfig, result: &PaperSessionResul
     println!("pair: {}", config.pair);
     println!("quantity: {:.4}", config.quantity);
     println!("fee_rate: {:.6}", config.fee_rate);
+    println!("fee_spread_multiplier: {:.4}", config.fee_spread_multiplier);
     println!("seed: {}", config.seed);
     println!("fill_model: {:?}", config.fill_model);
     println!("steps: {}", result.rows.len());

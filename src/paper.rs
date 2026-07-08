@@ -14,6 +14,7 @@ use crate::strategy::StrategyContext;
 pub struct PaperSessionConfig {
     pub order_quantity: f64,
     pub fee_rate: f64,
+    pub fee_spread_multiplier: f64,
     pub seed: u64,
     #[serde(default)]
     pub fill_model: PaperFillModelConfig,
@@ -27,6 +28,7 @@ impl Default for PaperSessionConfig {
         Self {
             order_quantity: 1.0,
             fee_rate: 0.001,
+            fee_spread_multiplier: 0.0,
             seed: 42,
             fill_model: PaperFillModelConfig::default(),
             volatility_window: 50,
@@ -141,12 +143,18 @@ impl PaperSessionRunner {
             regime,
         };
         let decision = agent.decide(state, &context);
+        let quote = fee_aware_quote(
+            decision.quote,
+            state.mid_price,
+            self.config.fee_rate,
+            self.config.fee_spread_multiplier,
+        );
         let observed_quote = event_quote(event);
         let fills = observed_quote
-            .map(|quote| {
+            .map(|observed_quote| {
                 observed_quote_fills(
-                    decision.quote,
                     quote,
+                    observed_quote,
                     estimated_volatility,
                     self.config.fill_model,
                     self.config.order_quantity,
@@ -170,7 +178,7 @@ impl PaperSessionRunner {
             estimated_volatility,
             regime,
             agent_mode: decision.mode,
-            quote: decision.quote,
+            quote,
             state,
             drawdown,
             fills: &fills,
@@ -278,6 +286,24 @@ fn event_quote(event: MarketEvent) -> Option<Quote> {
         bid: event.bid?,
         ask: event.ask?,
     })
+}
+
+fn fee_aware_quote(quote: Quote, mid_price: f64, fee_rate: f64, multiplier: f64) -> Quote {
+    if multiplier <= 0.0 || fee_rate <= 0.0 {
+        return quote;
+    }
+
+    let break_even_spread = 2.0 * mid_price * fee_rate;
+    let minimum_spread = multiplier * break_even_spread;
+    if quote.spread() >= minimum_spread {
+        return quote;
+    }
+
+    let center = (quote.bid + quote.ask) / 2.0;
+    Quote {
+        bid: center - minimum_spread / 2.0,
+        ask: center + minimum_spread / 2.0,
+    }
 }
 
 fn observed_quote_fills(
@@ -552,6 +578,24 @@ mod tests {
         assert!(csv.starts_with("timestamp_ms,mid_price"));
         assert!(csv.contains(",FixedSpread,"));
         assert_eq!(csv.lines().count(), 2);
+    }
+
+    #[test]
+    fn paper_session_can_enforce_fee_aware_spread_floor() {
+        let events = vec![MarketEvent::from_quote(1, 99.95, 100.05)];
+        let result = run_paper_session(
+            &events,
+            &agent(),
+            PaperSessionConfig {
+                fee_rate: 0.001,
+                fee_spread_multiplier: 1.5,
+                ..PaperSessionConfig::default()
+            },
+        );
+
+        let row = &result.rows[0];
+        let expected_spread = 2.0 * row.mid_price * 0.001 * 1.5;
+        assert!((row.ask - row.bid - expected_spread).abs() < 1e-12);
     }
 
     #[test]
