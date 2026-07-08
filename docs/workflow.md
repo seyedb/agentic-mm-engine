@@ -184,3 +184,11 @@ python3 research/run_paper_live_report.py configs/runs/kraken_solusd_paper_live.
 ```
 
 This writes the live CSV, a sidecar metadata file, and a Plotly HTML report. Use `--skip-run` to regenerate the analysis, metadata, and Plotly report from an existing live CSV.
+
+Calibrate the touch-intensity paper fill model against a logged paper session:
+
+```bash
+python3 research/calibrate_paper_fill_model.py target/reports/kraken_solusd_paper_live.csv
+```
+
+The calibration report ranks parameter grids by likelihood of the logged buy/sell fill labels.
