@@ -192,3 +192,9 @@ python3 research/calibrate_paper_fill_model.py target/reports/kraken_solusd_pape
 ```
 
 The calibration report ranks parameter grids by likelihood of the logged buy/sell fill labels.
+
+Print the best calibrated `fill_model` block without editing the run config:
+
+```bash
+python3 research/propose_paper_fill_config.py target/research/kraken_solusd_paper_live_paper_fill_calibration.csv
+```
