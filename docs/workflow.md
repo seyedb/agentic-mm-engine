@@ -231,3 +231,15 @@ The calibration comparison is written to:
 ```text
 target/research/paper_fill_calibrations.csv
 ```
+
+Write a compact Markdown summary of live run and calibration results:
+
+```bash
+python3 research/summarize_paper_live_research.py
+```
+
+The summary is written to:
+
+```text
+target/research/paper_live_summary.md
+```
