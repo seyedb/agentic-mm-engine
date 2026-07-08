@@ -207,3 +207,15 @@ Print the best calibrated `fill_model` block without editing the run config:
 ```bash
 python3 research/propose_paper_fill_config.py target/research/kraken_solusd_paper_live_paper_fill_calibration.csv
 ```
+
+Compare preserved live paper runs:
+
+```bash
+python3 research/compare_paper_live_runs.py
+```
+
+The comparison is written to:
+
+```text
+target/research/paper_live_runs.csv
+```
