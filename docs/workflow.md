@@ -219,3 +219,15 @@ The comparison is written to:
 ```text
 target/research/paper_live_runs.csv
 ```
+
+Compare the best calibrated fill-model parameters across preserved live runs:
+
+```bash
+python3 research/compare_paper_fill_calibrations.py
+```
+
+The calibration comparison is written to:
+
+```text
+target/research/paper_fill_calibrations.csv
+```
