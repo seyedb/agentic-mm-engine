@@ -180,10 +180,19 @@ This does not place orders. It only records public quote snapshots, agent quotes
 Run the live session and produce the analysis plus Plotly report in one step:
 
 ```bash
-python3 research/run_paper_live_report.py configs/runs/kraken_solusd_paper_live.json
+python3 research/run_paper_live_report.py configs/runs/kraken_solusd_paper_live.json \
+  --run-id solusd_20260708_001
 ```
 
-This writes the live CSV, a sidecar metadata file, and a Plotly HTML report. Use `--skip-run` to regenerate the analysis, metadata, and Plotly report from an existing live CSV.
+This writes a live CSV, sidecar metadata file, and Plotly HTML report without overwriting earlier runs:
+
+```text
+target/reports/paper_live/solusd_20260708_001.csv
+target/reports/paper_live/solusd_20260708_001.meta.json
+target/research/solusd_20260708_001.html
+```
+
+Use `--skip-run` to regenerate the analysis, metadata, and Plotly report from an existing live CSV.
 
 Calibrate the touch-intensity paper fill model against a logged paper session:
 
