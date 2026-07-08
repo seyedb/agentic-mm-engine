@@ -183,4 +183,4 @@ Run the live session and produce the analysis plus Plotly report in one step:
 python3 research/run_paper_live_report.py configs/runs/kraken_solusd_paper_live.json
 ```
 
-Use `--skip-run` to regenerate the analysis and Plotly report from an existing live CSV.
+This writes the live CSV, a sidecar metadata file, and a Plotly HTML report. Use `--skip-run` to regenerate the analysis, metadata, and Plotly report from an existing live CSV.
