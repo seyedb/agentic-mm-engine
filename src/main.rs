@@ -5,6 +5,7 @@ use mm_engine::engine::simulation::{
     FillModelConfig, RegimeConfig, SimulationConfig, SimulationResult, run_replay_simulation,
     run_simulation,
 };
+use mm_engine::live::{PaperLiveConfig, run_kraken_paper_live};
 use mm_engine::market::{InMemoryMarketData, MarketEvent, market_events_from_csv};
 use mm_engine::paper::{
     PaperFillModelConfig, PaperSessionConfig, paper_session_to_csv, run_paper_session,
@@ -208,6 +209,34 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             volatility_window,
             regime,
         }),
+        RunSpec::PaperLive {
+            pair,
+            output,
+            controller,
+            quantity,
+            fee_rate,
+            seed,
+            fill_model,
+            volatility_window,
+            regime,
+            samples,
+            interval_seconds,
+            timeout_seconds,
+        } => run_kraken_paper_live(PaperLiveConfig {
+            pair,
+            output,
+            controller,
+            quantity,
+            fee_rate,
+            seed,
+            fill_model,
+            volatility_window,
+            regime,
+            samples,
+            interval_seconds,
+            timeout_seconds,
+        })
+        .map(|_| ()),
     }
 }
 
@@ -278,6 +307,31 @@ enum RunSpec {
         #[serde(default)]
         regime: RegimeConfig,
     },
+    #[serde(rename = "paper_live")]
+    PaperLive {
+        pair: String,
+        #[serde(default)]
+        output: Option<String>,
+        controller: RuleBasedControllerParams,
+        #[serde(default = "default_order_quantity")]
+        quantity: f64,
+        #[serde(default = "default_fee_rate")]
+        fee_rate: f64,
+        #[serde(default = "default_seed")]
+        seed: u64,
+        #[serde(default)]
+        fill_model: PaperFillModelConfig,
+        #[serde(default = "default_volatility_window")]
+        volatility_window: usize,
+        #[serde(default)]
+        regime: RegimeConfig,
+        #[serde(default = "default_paper_live_samples")]
+        samples: usize,
+        #[serde(default = "default_paper_live_interval_seconds")]
+        interval_seconds: f64,
+        #[serde(default = "default_paper_live_timeout_seconds")]
+        timeout_seconds: f64,
+    },
 }
 
 impl RunSpec {
@@ -340,6 +394,32 @@ impl RunSpec {
                 validate_non_negative_f64("fee_rate", *fee_rate)?;
                 validate_paper_fill_model(*fill_model)?;
             }
+            Self::PaperLive {
+                pair,
+                output,
+                controller,
+                quantity,
+                fee_rate,
+                seed: _,
+                fill_model,
+                volatility_window: _,
+                regime: _,
+                samples,
+                interval_seconds,
+                timeout_seconds,
+            } => {
+                validate_pair(pair)?;
+                if let Some(output) = output {
+                    validate_data_path(output)?;
+                }
+                validate_controller(controller)?;
+                validate_positive_f64("quantity", *quantity)?;
+                validate_non_negative_f64("fee_rate", *fee_rate)?;
+                validate_paper_fill_model(*fill_model)?;
+                validate_positive_usize("samples", *samples)?;
+                validate_non_negative_f64("interval_seconds", *interval_seconds)?;
+                validate_positive_f64("timeout_seconds", *timeout_seconds)?;
+            }
         }
 
         Ok(())
@@ -368,6 +448,18 @@ fn default_volatility_window() -> usize {
 
 fn default_seed() -> u64 {
     SimulationConfig::default().seed
+}
+
+fn default_paper_live_samples() -> usize {
+    60
+}
+
+fn default_paper_live_interval_seconds() -> f64 {
+    5.0
+}
+
+fn default_paper_live_timeout_seconds() -> f64 {
+    10.0
 }
 
 fn default_replay_sweep_seeds() -> Vec<u64> {
@@ -402,6 +494,14 @@ fn validate_non_empty<T>(name: &str, values: &[T]) -> Result<(), String> {
     }
 }
 
+fn validate_positive_usize(name: &str, value: usize) -> Result<(), String> {
+    if value == 0 {
+        Err(format!("{name} must be positive"))
+    } else {
+        Ok(())
+    }
+}
+
 fn validate_positive_f64(name: &str, value: f64) -> Result<(), String> {
     validate_finite_f64(name, value)?;
     if value <= 0.0 {
@@ -426,6 +526,18 @@ fn validate_finite_f64(name: &str, value: f64) -> Result<(), String> {
     } else {
         Err(format!("{name} must be finite"))
     }
+}
+
+fn validate_pair(pair: &str) -> Result<(), String> {
+    if pair.trim().is_empty() {
+        return Err("pair must not be empty".to_string());
+    }
+
+    if !pair.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return Err("pair must contain only ASCII letters and numbers".to_string());
+    }
+
+    Ok(())
 }
 
 fn validate_controller(controller: &RuleBasedControllerParams) -> Result<(), String> {
@@ -1494,6 +1606,55 @@ mod tests {
                 );
             }
             _ => panic!("expected paper session run spec"),
+        }
+    }
+
+    #[test]
+    fn run_spec_paper_live_parses_public_feed_config() {
+        let spec = parse_run_spec(
+            r#"{
+              "type": "paper_live",
+              "pair": "SOLUSD",
+              "controller": {
+                "fixed_spread": {
+                  "spread": 0.02,
+                  "skew_coeff": 0.0
+                },
+                "risk_managed": {
+                  "risk_aversion": 0.2,
+                  "liquidity_depth": 100.0,
+                  "horizon": 10.0,
+                  "min_spread": 0.02
+                },
+                "inventory_limit": 2.0
+              },
+              "quantity": 0.1,
+              "fee_rate": 0.001,
+              "samples": 3,
+              "interval_seconds": 0.0,
+              "timeout_seconds": 2.0
+            }"#,
+        )
+        .unwrap();
+
+        match spec {
+            RunSpec::PaperLive {
+                pair,
+                quantity,
+                fee_rate,
+                samples,
+                interval_seconds,
+                timeout_seconds,
+                ..
+            } => {
+                assert_eq!(pair, "SOLUSD");
+                assert_eq!(quantity, 0.1);
+                assert_eq!(fee_rate, 0.001);
+                assert_eq!(samples, 3);
+                assert_eq!(interval_seconds, 0.0);
+                assert_eq!(timeout_seconds, 2.0);
+            }
+            _ => panic!("expected paper live run spec"),
         }
     }
 

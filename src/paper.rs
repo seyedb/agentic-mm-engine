@@ -88,40 +88,70 @@ pub fn run_paper_session(
     agent: &RuleBasedControllerParams,
     config: PaperSessionConfig,
 ) -> PaperSessionResult {
-    let mut state = None;
-    let mut previous_mid_price = None;
-    let mut volatility = RollingVolatility::new(config.volatility_window);
+    let mut runner = PaperSessionRunner::new(config);
     let mut rows = Vec::with_capacity(events.len());
-    let mut peak_pnl = 0.0;
-    let mut rng = StdRng::seed_from_u64(config.seed);
 
     for event in events {
-        let state = state.get_or_insert_with(|| SystemState::new(event.mid_price));
-        if let Some(previous_mid_price) = previous_mid_price {
-            volatility.push(event.mid_price - previous_mid_price);
+        rows.push(runner.step(*event, agent));
+    }
+
+    PaperSessionResult { rows }
+}
+
+pub struct PaperSessionRunner {
+    config: PaperSessionConfig,
+    state: Option<SystemState>,
+    previous_mid_price: Option<f64>,
+    volatility: RollingVolatility,
+    peak_pnl: f64,
+    rng: StdRng,
+}
+
+impl PaperSessionRunner {
+    pub fn new(config: PaperSessionConfig) -> Self {
+        Self {
+            volatility: RollingVolatility::new(config.volatility_window),
+            rng: StdRng::seed_from_u64(config.seed),
+            config,
+            state: None,
+            previous_mid_price: None,
+            peak_pnl: 0.0,
         }
-        previous_mid_price = Some(event.mid_price);
+    }
+
+    pub fn step(
+        &mut self,
+        event: MarketEvent,
+        agent: &RuleBasedControllerParams,
+    ) -> PaperSessionRow {
+        let state = self
+            .state
+            .get_or_insert_with(|| SystemState::new(event.mid_price));
+        if let Some(previous_mid_price) = self.previous_mid_price {
+            self.volatility.push(event.mid_price - previous_mid_price);
+        }
+        self.previous_mid_price = Some(event.mid_price);
         state.mid_price = event.mid_price;
         state.mark_to_market();
 
-        let estimated_volatility = volatility.estimate();
-        let regime = MarketRegime::classify(estimated_volatility, config.regime);
+        let estimated_volatility = self.volatility.estimate();
+        let regime = MarketRegime::classify(estimated_volatility, self.config.regime);
         let context = StrategyContext {
             estimated_volatility,
             regime,
         };
         let decision = agent.decide(state, &context);
-        let observed_quote = event_quote(*event);
+        let observed_quote = event_quote(event);
         let fills = observed_quote
             .map(|quote| {
                 observed_quote_fills(
                     decision.quote,
                     quote,
                     estimated_volatility,
-                    config.fill_model,
-                    config.order_quantity,
-                    config.fee_rate,
-                    &mut rng,
+                    self.config.fill_model,
+                    self.config.order_quantity,
+                    self.config.fee_rate,
+                    &mut self.rng,
                 )
             })
             .unwrap_or_default();
@@ -131,11 +161,11 @@ pub fn run_paper_session(
         }
         state.mid_price = event.mid_price;
         state.mark_to_market();
-        peak_pnl = f64::max(peak_pnl, state.pnl);
-        let drawdown = peak_pnl - state.pnl;
+        self.peak_pnl = f64::max(self.peak_pnl, state.pnl);
+        let drawdown = self.peak_pnl - state.pnl;
 
-        rows.push(session_row(SessionRowInput {
-            event: *event,
+        session_row(SessionRowInput {
+            event,
             observed_quote,
             estimated_volatility,
             regime,
@@ -144,44 +174,50 @@ pub fn run_paper_session(
             state,
             drawdown,
             fills: &fills,
-        }));
+        })
     }
-
-    PaperSessionResult { rows }
 }
 
 pub fn paper_session_to_csv(result: &PaperSessionResult) -> String {
-    let mut csv = String::from(
-        "timestamp_ms,mid_price,observed_bid,observed_ask,estimated_volatility,regime,agent_mode,bid,ask,spread,inventory,cash,pnl,drawdown,fills,buy_fills,sell_fills,fill_quantity,fill_notional,fees\n",
-    );
+    let mut csv = String::from(paper_session_csv_header());
+    csv.push('\n');
 
     for row in &result.rows {
-        let values = vec![
-            row.timestamp_ms.to_string(),
-            format_f64(row.mid_price),
-            optional_f64(row.observed_bid),
-            optional_f64(row.observed_ask),
-            format_f64(row.estimated_volatility),
-            regime_name(row.regime).to_string(),
-            controller_mode_name(&row.agent_mode).to_string(),
-            format_f64(row.bid),
-            format_f64(row.ask),
-            format_f64(row.ask - row.bid),
-            format_f64(row.inventory),
-            format_f64(row.cash),
-            format_f64(row.pnl),
-            format_f64(row.drawdown),
-            row.fills.to_string(),
-            row.buy_fills.to_string(),
-            row.sell_fills.to_string(),
-            format_f64(row.fill_quantity),
-            format_f64(row.fill_notional),
-            format_f64(row.fees),
-        ];
-        writeln!(csv, "{}", values.join(",")).expect("writing to a String should not fail");
+        writeln!(csv, "{}", paper_session_row_to_csv(row))
+            .expect("writing to a String should not fail");
     }
 
     csv
+}
+
+pub fn paper_session_csv_header() -> &'static str {
+    "timestamp_ms,mid_price,observed_bid,observed_ask,estimated_volatility,regime,agent_mode,bid,ask,spread,inventory,cash,pnl,drawdown,fills,buy_fills,sell_fills,fill_quantity,fill_notional,fees"
+}
+
+pub fn paper_session_row_to_csv(row: &PaperSessionRow) -> String {
+    let values = vec![
+        row.timestamp_ms.to_string(),
+        format_f64(row.mid_price),
+        optional_f64(row.observed_bid),
+        optional_f64(row.observed_ask),
+        format_f64(row.estimated_volatility),
+        regime_name(row.regime).to_string(),
+        controller_mode_name(&row.agent_mode).to_string(),
+        format_f64(row.bid),
+        format_f64(row.ask),
+        format_f64(row.ask - row.bid),
+        format_f64(row.inventory),
+        format_f64(row.cash),
+        format_f64(row.pnl),
+        format_f64(row.drawdown),
+        row.fills.to_string(),
+        row.buy_fills.to_string(),
+        row.sell_fills.to_string(),
+        format_f64(row.fill_quantity),
+        format_f64(row.fill_notional),
+        format_f64(row.fees),
+    ];
+    values.join(",")
 }
 
 struct SessionRowInput<'a> {
@@ -516,5 +552,26 @@ mod tests {
         assert!(csv.starts_with("timestamp_ms,mid_price"));
         assert!(csv.contains(",FixedSpread,"));
         assert_eq!(csv.lines().count(), 2);
+    }
+
+    #[test]
+    fn paper_runner_keeps_state_between_steps() {
+        let mut runner = PaperSessionRunner::new(PaperSessionConfig {
+            order_quantity: 1.0,
+            fee_rate: 0.001,
+            fill_model: PaperFillModelConfig::TouchIntensity {
+                base_intensity: 1.0,
+                distance_decay: 0.0,
+                volatility_boost: 0.0,
+            },
+            ..PaperSessionConfig::default()
+        });
+
+        let first = runner.step(MarketEvent::from_quote(1, 99.95, 100.05), &agent());
+        let second = runner.step(MarketEvent::from_quote(2, 100.00, 100.10), &agent());
+
+        assert_eq!(first.fills, 2);
+        assert_eq!(second.fills, 2);
+        assert!(second.fees > first.fees);
     }
 }

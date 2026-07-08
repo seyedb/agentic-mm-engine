@@ -166,3 +166,20 @@ The report is written to:
 ```text
 target/research/kraken_solusd_paper_session.html
 ```
+
+## Run A Live Paper Session
+
+Live paper sessions poll public Kraken top-of-book data and append one decision row per sample:
+
+```bash
+cargo run -- run configs/runs/kraken_solusd_paper_live.json
+```
+
+This does not place orders. It only records public quote snapshots, agent quotes, paper fills, inventory, PnL, fees, and drawdown.
+
+Analyze and plot the live paper log the same way:
+
+```bash
+python3 research/analyze_paper_session.py target/reports/kraken_solusd_paper_live.csv
+python3 research/plot_paper_session.py target/reports/kraken_solusd_paper_live.csv
+```
