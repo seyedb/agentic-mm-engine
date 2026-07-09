@@ -20,10 +20,10 @@
   "policy": {
     "type": "adaptive",
     "min_spread": 0.02,
-    "max_spread": 0.12,
-    "volatility_spread_multiplier": 2.0,
-    "inventory_skew_multiplier": 0.05,
-    "touch_spread_multiplier": 0.6
+    "max_spread": 0.08,
+    "volatility_spread_multiplier": 1.0,
+    "inventory_skew_multiplier": 0.0,
+    "touch_spread_multiplier": 0.2
   },
   "seed": 42,
   "fill_model": {
