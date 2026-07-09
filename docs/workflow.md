@@ -23,6 +23,20 @@ python3 research/fetch_public_quotes.py \
   --out data/kraken_solusd_quotes.csv
 ```
 
+Collect a timestamped quote dataset for longer paper-policy research:
+
+```bash
+python3 research/collect_quote_dataset.py \
+  --pair SOLUSD \
+  --samples 360 \
+  --interval-seconds 5 \
+  --evaluate \
+  --window-size 60 \
+  --step-size 60
+```
+
+This writes a quote CSV and metadata file under `data/quotes/`. With `--evaluate`, it also runs static-vs-adaptive paper policy evaluation and writes dataset-specific results under `target/research/quote_datasets/`.
+
 Use `--since` to create named replay windows:
 
 ```bash
