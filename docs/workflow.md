@@ -237,6 +237,20 @@ target/research/adaptive_policy_sweep_variants.csv
 target/research/adaptive_policy_sweep_runs.csv
 ```
 
+Build a ledger across collected quote datasets:
+
+```bash
+python3 research/compare_quote_dataset_experiments.py
+```
+
+This reads `data/quotes/*.meta.json`, follows each metadata file to its policy-evaluation output, and writes:
+
+```text
+target/research/quote_dataset_policy_ledger.csv
+target/research/quote_dataset_policy_pairs.csv
+target/research/quote_dataset_policy_summary.md
+```
+
 Run the live session and produce the analysis plus Plotly report in one step:
 
 ```bash
