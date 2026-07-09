@@ -190,6 +190,23 @@ python3 research/compare_paper_configs.py \
   configs/runs/kraken_solusd_adaptive_maker_fee_paper_session.json
 ```
 
+Evaluate paper policies across quote-data windows:
+
+```bash
+python3 research/evaluate_paper_policies.py \
+  configs/runs/kraken_solusd_maker_fee_paper_session.json \
+  configs/runs/kraken_solusd_adaptive_maker_fee_paper_session.json \
+  --window-size 10 \
+  --step-size 10
+```
+
+This writes per-window and aggregate policy summaries:
+
+```text
+target/research/paper_policy_window_runs.csv
+target/research/paper_policy_evaluation.csv
+```
+
 Run the live session and produce the analysis plus Plotly report in one step:
 
 ```bash
