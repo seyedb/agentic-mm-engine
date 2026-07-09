@@ -193,3 +193,6 @@ Cargo.lock
 /target
 .idea/
 # End of https://www.toptal.com/developers/gitignore/api/rust,python
+
+# Local market-data captures
+data/quotes/
