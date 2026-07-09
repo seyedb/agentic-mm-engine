@@ -240,6 +240,12 @@ target/research/adaptive_policy_sweep_runs.csv
 Build a ledger across collected quote datasets:
 
 ```bash
+python3 research/rerun_quote_dataset_evaluations.py \
+  --window-size 30 \
+  --step-size 30 \
+  --tag current_policy \
+  --update-metadata
+
 python3 research/compare_quote_dataset_experiments.py
 ```
 
@@ -249,6 +255,20 @@ This reads `data/quotes/*.meta.json`, follows each metadata file to its policy-e
 target/research/quote_dataset_policy_ledger.csv
 target/research/quote_dataset_policy_pairs.csv
 target/research/quote_dataset_policy_summary.md
+```
+
+Diagnose the static-vs-adaptive result at window level:
+
+```bash
+python3 research/diagnose_policy_windows.py
+```
+
+This writes a paired window CSV, Markdown summary, and interactive Plotly report:
+
+```text
+target/research/policy_window_diagnostics.csv
+target/research/policy_window_diagnostics.md
+target/research/policy_window_diagnostics.html
 ```
 
 Run the live session and produce the analysis plus Plotly report in one step:
