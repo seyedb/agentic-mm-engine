@@ -104,6 +104,12 @@ The first agentic component is a rule-based controller. It observes the current 
 
 This is intentionally simple. The controller is the decision layer where later paper-trading and ML policies can plug in without replacing the accounting, replay, or strategy code.
 
+## Paper Policy
+
+Paper sessions can run with either a static policy or a simple adaptive policy. The static policy uses the controller quote unchanged. The adaptive policy widens quotes using observed top-of-book spread and estimated volatility, then skews the quote center away from current inventory.
+
+This policy layer is deliberately small: it gives the project a clear agent interface for choosing quote behavior while leaving execution, accounting, and reporting unchanged.
+
 ## Fills
 
 The legacy fill model samples a noisy market price and fills crossed quotes:

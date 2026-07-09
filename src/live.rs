@@ -9,8 +9,8 @@ use crate::agent::RuleBasedControllerParams;
 use crate::engine::simulation::RegimeConfig;
 use crate::market::MarketEvent;
 use crate::paper::{
-    PaperFillModelConfig, PaperSessionConfig, PaperSessionResult, PaperSessionRunner,
-    paper_session_csv_header, paper_session_row_to_csv,
+    PaperFillModelConfig, PaperPolicyConfig, PaperSessionConfig, PaperSessionResult,
+    PaperSessionRunner, paper_session_csv_header, paper_session_row_to_csv,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +21,7 @@ pub struct PaperLiveConfig {
     pub quantity: f64,
     pub fee_rate: f64,
     pub fee_spread_multiplier: f64,
+    pub policy: PaperPolicyConfig,
     pub seed: u64,
     pub fill_model: PaperFillModelConfig,
     pub volatility_window: usize,
@@ -54,6 +55,7 @@ pub fn run_kraken_paper_live(config: PaperLiveConfig) -> Result<PathBuf, Box<dyn
         order_quantity: config.quantity,
         fee_rate: config.fee_rate,
         fee_spread_multiplier: config.fee_spread_multiplier,
+        policy: config.policy,
         seed: config.seed,
         fill_model: config.fill_model,
         volatility_window: config.volatility_window,
@@ -172,6 +174,7 @@ fn print_paper_live_results(config: &PaperLiveConfig, result: &PaperSessionResul
     println!("quantity: {:.4}", config.quantity);
     println!("fee_rate: {:.6}", config.fee_rate);
     println!("fee_spread_multiplier: {:.4}", config.fee_spread_multiplier);
+    println!("policy: {:?}", config.policy);
     println!("seed: {}", config.seed);
     println!("fill_model: {:?}", config.fill_model);
     println!("steps: {}", result.rows.len());

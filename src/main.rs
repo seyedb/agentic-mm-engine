@@ -8,7 +8,8 @@ use mm_engine::engine::simulation::{
 use mm_engine::live::{PaperLiveConfig, run_kraken_paper_live};
 use mm_engine::market::{InMemoryMarketData, MarketEvent, market_events_from_csv};
 use mm_engine::paper::{
-    PaperFillModelConfig, PaperSessionConfig, paper_session_to_csv, run_paper_session,
+    PaperFillModelConfig, PaperPolicyConfig, PaperSessionConfig, paper_session_to_csv,
+    run_paper_session,
 };
 use mm_engine::strategy::market_maker::StrategyParams;
 use mm_engine::sweep::{SweepConfig, SweepResult, run_parameter_sweep, sweep_results_to_csv};
@@ -195,6 +196,7 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             quantity,
             fee_rate,
             fee_spread_multiplier,
+            policy,
             seed,
             fill_model,
             volatility_window,
@@ -206,6 +208,7 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             quantity,
             fee_rate,
             fee_spread_multiplier,
+            policy,
             seed,
             fill_model,
             volatility_window,
@@ -218,6 +221,7 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             quantity,
             fee_rate,
             fee_spread_multiplier,
+            policy,
             seed,
             fill_model,
             volatility_window,
@@ -232,6 +236,7 @@ fn run_configured_command(args: &[String]) -> Result<(), Box<dyn Error>> {
             quantity,
             fee_rate,
             fee_spread_multiplier,
+            policy,
             seed,
             fill_model,
             volatility_window,
@@ -304,6 +309,8 @@ enum RunSpec {
         fee_rate: f64,
         #[serde(default)]
         fee_spread_multiplier: f64,
+        #[serde(default)]
+        policy: PaperPolicyConfig,
         #[serde(default = "default_seed")]
         seed: u64,
         #[serde(default)]
@@ -325,6 +332,8 @@ enum RunSpec {
         fee_rate: f64,
         #[serde(default)]
         fee_spread_multiplier: f64,
+        #[serde(default)]
+        policy: PaperPolicyConfig,
         #[serde(default = "default_seed")]
         seed: u64,
         #[serde(default)]
@@ -389,6 +398,7 @@ impl RunSpec {
                 quantity,
                 fee_rate,
                 fee_spread_multiplier,
+                policy,
                 seed: _,
                 fill_model,
                 volatility_window: _,
@@ -402,6 +412,7 @@ impl RunSpec {
                 validate_positive_f64("quantity", *quantity)?;
                 validate_non_negative_f64("fee_rate", *fee_rate)?;
                 validate_non_negative_f64("fee_spread_multiplier", *fee_spread_multiplier)?;
+                validate_paper_policy(*policy)?;
                 validate_paper_fill_model(*fill_model)?;
             }
             Self::PaperLive {
@@ -411,6 +422,7 @@ impl RunSpec {
                 quantity,
                 fee_rate,
                 fee_spread_multiplier,
+                policy,
                 seed: _,
                 fill_model,
                 volatility_window: _,
@@ -427,6 +439,7 @@ impl RunSpec {
                 validate_positive_f64("quantity", *quantity)?;
                 validate_non_negative_f64("fee_rate", *fee_rate)?;
                 validate_non_negative_f64("fee_spread_multiplier", *fee_spread_multiplier)?;
+                validate_paper_policy(*policy)?;
                 validate_paper_fill_model(*fill_model)?;
                 validate_positive_usize("samples", *samples)?;
                 validate_non_negative_f64("interval_seconds", *interval_seconds)?;
@@ -580,6 +593,37 @@ fn validate_controller(controller: &RuleBasedControllerParams) -> Result<(), Str
     validate_non_negative_f64("controller.inventory_limit", controller.inventory_limit)
 }
 
+fn validate_paper_policy(policy: PaperPolicyConfig) -> Result<(), String> {
+    match policy {
+        PaperPolicyConfig::Static => Ok(()),
+        PaperPolicyConfig::Adaptive {
+            min_spread,
+            max_spread,
+            volatility_spread_multiplier,
+            inventory_skew_multiplier,
+            touch_spread_multiplier,
+        } => {
+            validate_positive_f64("policy.min_spread", min_spread)?;
+            validate_positive_f64("policy.max_spread", max_spread)?;
+            if max_spread < min_spread {
+                return Err(
+                    "policy.max_spread must be greater than or equal to policy.min_spread"
+                        .to_string(),
+                );
+            }
+            validate_non_negative_f64(
+                "policy.volatility_spread_multiplier",
+                volatility_spread_multiplier,
+            )?;
+            validate_non_negative_f64(
+                "policy.inventory_skew_multiplier",
+                inventory_skew_multiplier,
+            )?;
+            validate_non_negative_f64("policy.touch_spread_multiplier", touch_spread_multiplier)
+        }
+    }
+}
+
 fn validate_paper_fill_model(fill_model: PaperFillModelConfig) -> Result<(), String> {
     match fill_model {
         PaperFillModelConfig::Crossing => Ok(()),
@@ -603,6 +647,7 @@ struct PaperSessionOptions {
     quantity: f64,
     fee_rate: f64,
     fee_spread_multiplier: f64,
+    policy: PaperPolicyConfig,
     seed: u64,
     fill_model: PaperFillModelConfig,
     volatility_window: usize,
@@ -622,6 +667,7 @@ fn run_paper_session_options(options: PaperSessionOptions) -> Result<(), Box<dyn
             order_quantity: options.quantity,
             fee_rate: options.fee_rate,
             fee_spread_multiplier: options.fee_spread_multiplier,
+            policy: options.policy,
             seed: options.seed,
             fill_model: options.fill_model,
             volatility_window: options.volatility_window,
@@ -663,6 +709,7 @@ fn print_paper_session_results(
         "fee_spread_multiplier: {:.4}",
         options.fee_spread_multiplier
     );
+    println!("policy: {:?}", options.policy);
     println!("seed: {}", options.seed);
     println!("fill_model: {:?}", options.fill_model);
     println!("steps: {}", result.rows.len());
@@ -1586,6 +1633,14 @@ mod tests {
               },
               "quantity": 0.1,
               "fee_rate": 0.001,
+              "policy": {
+                "type": "adaptive",
+                "min_spread": 0.02,
+                "max_spread": 0.20,
+                "volatility_spread_multiplier": 1.0,
+                "inventory_skew_multiplier": 0.05,
+                "touch_spread_multiplier": 0.5
+              },
               "seed": 7,
               "fill_model": {
                 "type": "touch_intensity",
@@ -1603,6 +1658,7 @@ mod tests {
                 controller,
                 quantity,
                 fee_rate,
+                policy,
                 seed,
                 fill_model,
                 ..
@@ -1613,6 +1669,16 @@ mod tests {
                 assert_eq!(controller.inventory_limit, 4.0);
                 assert_eq!(quantity, 0.1);
                 assert_eq!(fee_rate, 0.001);
+                assert_eq!(
+                    policy,
+                    PaperPolicyConfig::Adaptive {
+                        min_spread: 0.02,
+                        max_spread: 0.20,
+                        volatility_spread_multiplier: 1.0,
+                        inventory_skew_multiplier: 0.05,
+                        touch_spread_multiplier: 0.5,
+                    }
+                );
                 assert_eq!(seed, 7);
                 assert_eq!(
                     fill_model,

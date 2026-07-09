@@ -15,6 +15,8 @@ pub struct PaperSessionConfig {
     pub order_quantity: f64,
     pub fee_rate: f64,
     pub fee_spread_multiplier: f64,
+    #[serde(default)]
+    pub policy: PaperPolicyConfig,
     pub seed: u64,
     #[serde(default)]
     pub fill_model: PaperFillModelConfig,
@@ -29,11 +31,33 @@ impl Default for PaperSessionConfig {
             order_quantity: 1.0,
             fee_rate: 0.001,
             fee_spread_multiplier: 0.0,
+            policy: PaperPolicyConfig::default(),
             seed: 42,
             fill_model: PaperFillModelConfig::default(),
             volatility_window: 50,
             regime: RegimeConfig::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum PaperPolicyConfig {
+    #[serde(rename = "static")]
+    Static,
+    #[serde(rename = "adaptive")]
+    Adaptive {
+        min_spread: f64,
+        max_spread: f64,
+        volatility_spread_multiplier: f64,
+        inventory_skew_multiplier: f64,
+        touch_spread_multiplier: f64,
+    },
+}
+
+impl Default for PaperPolicyConfig {
+    fn default() -> Self {
+        Self::Static
     }
 }
 
@@ -143,13 +167,20 @@ impl PaperSessionRunner {
             regime,
         };
         let decision = agent.decide(state, &context);
-        let quote = fee_aware_quote(
+        let observed_quote = event_quote(event);
+        let policy_quote = apply_paper_policy(
             decision.quote,
+            state,
+            observed_quote,
+            estimated_volatility,
+            self.config.policy,
+        );
+        let quote = fee_aware_quote(
+            policy_quote,
             state.mid_price,
             self.config.fee_rate,
             self.config.fee_spread_multiplier,
         );
-        let observed_quote = event_quote(event);
         let fills = observed_quote
             .map(|observed_quote| {
                 observed_quote_fills(
@@ -183,6 +214,66 @@ impl PaperSessionRunner {
             drawdown,
             fills: &fills,
         })
+    }
+}
+
+fn apply_paper_policy(
+    quote: Quote,
+    state: &SystemState,
+    observed_quote: Option<Quote>,
+    estimated_volatility: f64,
+    policy: PaperPolicyConfig,
+) -> Quote {
+    match policy {
+        PaperPolicyConfig::Static => quote,
+        PaperPolicyConfig::Adaptive {
+            min_spread,
+            max_spread,
+            volatility_spread_multiplier,
+            inventory_skew_multiplier,
+            touch_spread_multiplier,
+        } => adaptive_quote(
+            quote,
+            state,
+            observed_quote,
+            estimated_volatility,
+            AdaptivePolicyParams {
+                min_spread,
+                max_spread,
+                volatility_spread_multiplier,
+                inventory_skew_multiplier,
+                touch_spread_multiplier,
+            },
+        ),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AdaptivePolicyParams {
+    min_spread: f64,
+    max_spread: f64,
+    volatility_spread_multiplier: f64,
+    inventory_skew_multiplier: f64,
+    touch_spread_multiplier: f64,
+}
+
+fn adaptive_quote(
+    quote: Quote,
+    state: &SystemState,
+    observed_quote: Option<Quote>,
+    estimated_volatility: f64,
+    params: AdaptivePolicyParams,
+) -> Quote {
+    let mut spread = quote.spread().max(params.min_spread).max(
+        observed_quote.map(|quote| quote.spread()).unwrap_or(0.0) * params.touch_spread_multiplier,
+    ) + estimated_volatility * params.volatility_spread_multiplier;
+    spread = spread.clamp(params.min_spread, params.max_spread);
+
+    let center = (quote.bid + quote.ask) / 2.0 - state.inventory * params.inventory_skew_multiplier;
+
+    Quote {
+        bid: center - spread / 2.0,
+        ask: center + spread / 2.0,
     }
 }
 
@@ -596,6 +687,57 @@ mod tests {
         let row = &result.rows[0];
         let expected_spread = 2.0 * row.mid_price * 0.001 * 1.5;
         assert!((row.ask - row.bid - expected_spread).abs() < 1e-12);
+    }
+
+    #[test]
+    fn adaptive_policy_widens_toward_observed_spread() {
+        let state = SystemState::new(100.0);
+        let quote = apply_paper_policy(
+            Quote {
+                bid: 99.99,
+                ask: 100.01,
+            },
+            &state,
+            Some(Quote {
+                bid: 99.90,
+                ask: 100.10,
+            }),
+            0.0,
+            PaperPolicyConfig::Adaptive {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 0.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+            },
+        );
+
+        assert!((quote.spread() - 0.10).abs() < 1e-12);
+    }
+
+    #[test]
+    fn adaptive_policy_skews_away_from_long_inventory() {
+        let mut state = SystemState::new(100.0);
+        state.inventory = 2.0;
+        let quote = apply_paper_policy(
+            Quote {
+                bid: 99.90,
+                ask: 100.10,
+            },
+            &state,
+            None,
+            0.0,
+            PaperPolicyConfig::Adaptive {
+                min_spread: 0.20,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 0.0,
+                inventory_skew_multiplier: 0.10,
+                touch_spread_multiplier: 0.0,
+            },
+        );
+
+        assert!((quote.bid - 99.70).abs() < 1e-12);
+        assert!((quote.ask - 99.90).abs() < 1e-12);
     }
 
     #[test]

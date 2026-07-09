@@ -33,6 +33,7 @@ REQUIRED_COLUMNS = {
 class ConfigSummary:
     config: Path
     output: Path
+    policy: str
     fee_rate: float
     fee_spread_multiplier: float
     base_intensity: str
@@ -114,6 +115,14 @@ def fill_model_value(config: dict[str, Any], key: str) -> str:
     return "" if value is None else str(value)
 
 
+def policy_name(config: dict[str, Any]) -> str:
+    policy = config.get("policy", {})
+    if not isinstance(policy, dict):
+        return "static"
+    value = policy.get("type", "static")
+    return str(value)
+
+
 def summarize(config_path: Path, config: dict[str, Any]) -> ConfigSummary:
     output = project_path(Path(config["output"]))
     with output.open(newline="") as handle:
@@ -149,6 +158,7 @@ def summarize(config_path: Path, config: dict[str, Any]) -> ConfigSummary:
     return ConfigSummary(
         config=config_path,
         output=output,
+        policy=policy_name(config),
         fee_rate=float(config.get("fee_rate", 0.0)),
         fee_spread_multiplier=float(config.get("fee_spread_multiplier", 0.0)),
         base_intensity=fill_model_value(config, "base_intensity"),
@@ -174,6 +184,7 @@ def write_summaries(path: Path, summaries: list[ConfigSummary]) -> None:
         writer.writerow(
             [
                 "config",
+                "policy",
                 "fee_rate",
                 "fee_spread_multiplier",
                 "base_intensity",
@@ -199,6 +210,7 @@ def write_summaries(path: Path, summaries: list[ConfigSummary]) -> None:
 def summary_to_csv_row(summary: ConfigSummary) -> list[str]:
     return [
         str(summary.config),
+        summary.policy,
         format_float(summary.fee_rate),
         format_float(summary.fee_spread_multiplier),
         summary.base_intensity,
@@ -223,10 +235,11 @@ def format_float(value: float) -> str:
 
 
 def render_table(summaries: list[ConfigSummary]) -> str:
-    headers = ["config", "fee", "floor", "fills", "pnl", "fees", "spread", "qdist"]
+    headers = ["config", "policy", "fee", "floor", "fills", "pnl", "fees", "spread", "qdist"]
     rows = [
         [
             summary.config.stem,
+            summary.policy,
             f"{summary.fee_rate:.5f}",
             f"{summary.fee_spread_multiplier:.2f}",
             str(summary.fills),
