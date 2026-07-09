@@ -221,6 +221,22 @@ target/research/paper_policy_window_runs.csv
 target/research/paper_policy_evaluation.csv
 ```
 
+Sweep adaptive paper-policy parameters on a collected quote dataset:
+
+```bash
+python3 research/sweep_adaptive_paper_policy.py \
+  --data data/quotes/solusd_policy_eval_120x3s.csv \
+  --window-size 30 \
+  --step-size 30
+```
+
+This generates adaptive policy variants, evaluates each one over the same quote windows, and writes ranked results:
+
+```text
+target/research/adaptive_policy_sweep_variants.csv
+target/research/adaptive_policy_sweep_runs.csv
+```
+
 Run the live session and produce the analysis plus Plotly report in one step:
 
 ```bash
