@@ -271,6 +271,20 @@ target/research/policy_window_diagnostics.md
 target/research/policy_window_diagnostics.html
 ```
 
+Audit whether policy conclusions depend on the paper fill model:
+
+```bash
+python3 research/analyze_fill_assumption_sensitivity.py \
+  --window-size 30 \
+  --step-size 30
+```
+
+This reruns static-vs-adaptive evaluation across collected quote datasets under alternative touch-intensity fill assumptions and writes:
+
+```text
+target/research/fill_assumption_sensitivity.csv
+```
+
 Run the live session and produce the analysis plus Plotly report in one step:
 
 ```bash
