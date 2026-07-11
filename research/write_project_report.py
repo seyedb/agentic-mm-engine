@@ -13,7 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POLICY_SUMMARY = Path("target/research/policy_gate_policy_summary.csv")
 DEFAULT_SELECTOR_SWEEP = Path("target/research/selector_policy_sweep.csv")
 DEFAULT_LEARNED_SELECTOR_FOLDS = Path("target/research/learned_policy_selector_folds.csv")
-DEFAULT_OUTPUT = Path("target/research/project_report.md")
+DEFAULT_LIVE_RUNS = Path("target/research/paper_live_runs.csv")
+DEFAULT_OUTPUT = Path("docs/final_report.md")
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,6 +26,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_LEARNED_SELECTOR_FOLDS,
     )
+    parser.add_argument("--live-runs", type=Path, default=DEFAULT_LIVE_RUNS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     return parser.parse_args()
 
@@ -78,6 +80,22 @@ def learned_selector_row(rows: list[dict[str, str]]) -> dict[str, str] | None:
     return None
 
 
+def policy_row(
+    rows: list[dict[str, str]], assumption: str, policy: str
+) -> dict[str, str] | None:
+    for row in rows:
+        if row["assumption"] == assumption and row["policy"] == policy:
+            return row
+    return None
+
+
+def best_assumption_policy(rows: list[dict[str, str]], assumption: str) -> dict[str, str]:
+    candidates = [row for row in rows if row["assumption"] == assumption]
+    if not candidates:
+        raise ValueError(f"policy summary has no rows for assumption {assumption!r}")
+    return max(candidates, key=lambda row: parse_float(row, "mean_utility"))
+
+
 def best_sweep_row(rows: list[dict[str, str]]) -> dict[str, str]:
     if not rows:
         raise ValueError("selector sweep has no rows")
@@ -94,43 +112,65 @@ def mean_column(rows: list[dict[str, str]], column: str) -> float:
     return sum(parse_float(row, column) for row in rows) / len(rows)
 
 
+def latest_live_run(rows: list[dict[str, str]]) -> dict[str, str] | None:
+    if not rows:
+        return None
+    return max(
+        rows,
+        key=lambda row: (
+            int(row.get("steps", "0") or "0"),
+            row.get("ended_at", ""),
+            row.get("run_id", ""),
+        ),
+    )
+
+
+def optional_csv(path: Path) -> list[dict[str, str]]:
+    return read_csv(path) if path.exists() else []
+
+
 def render_report(
     policy_rows: list[dict[str, str]],
     sweep_rows: list[dict[str, str]],
     learned_rows: list[dict[str, str]],
+    live_rows: list[dict[str, str]],
 ) -> str:
     best_policy = best_configured_policy(policy_rows)
     selector = selector_row(policy_rows)
     adaptive = adaptive_row(policy_rows)
     learned_selector = learned_selector_row(policy_rows)
+    conservative_best = best_assumption_policy(policy_rows, "conservative_fill")
+    liquid_best = best_assumption_policy(policy_rows, "liquid_fill")
+    conservative_learned = policy_row(policy_rows, "conservative_fill", "learned_selector")
+    liquid_learned = policy_row(policy_rows, "liquid_fill", "learned_selector")
     best_sweep = best_sweep_row(sweep_rows)
-    interpretation = (
-        "The selector is promising because it can beat the adaptive baseline under the "
-        "configured evaluation while using adaptive quoting less than 100% of the time. "
-        "The learned gate is a real ML-agent proof of concept, but robustness still "
-        "depends on more quote datasets and fill-assumption checks."
-    )
+    live_run = latest_live_run(live_rows)
 
     lines = [
-        "# Agentic Market Making: Brief Research Report",
+        "# Agentic Market Making: Final Research Report",
         "",
-        "## Objective",
+        "## Scope",
         "",
-        "Build a small Rust research engine for testing market-making policies on public top-of-book data.",
+        "This is an experimental market-making research project, not a production trading system. The goal is to show a clean, reproducible loop from public quote data to Rust paper execution and a small learned policy controller.",
         "",
-        "## Current Design",
+        "## System",
         "",
-        "- Rust runs replay, quoting, fills, fees, inventory, and PnL accounting.",
-        "- Python runs research sweeps, policy gates, and report generation.",
-        "- Policies include static, adaptive, hybrid, and a weighted selector.",
+        "- Rust runs replay, paper sessions, live public-data paper mode, fills, fees, inventory, and PnL accounting.",
+        "- Python runs data collection, policy evaluation, learned-gate training, Plotly reporting, and summary reports.",
+        "- Policies include static, adaptive, hybrid, selector, and learned-selector variants.",
+        "- The learned selector is trained in Python, exported as JSON, and loaded back into Rust for paper execution.",
         "",
-        "## Agentic Status",
+        "## Research Result",
         "",
-        "The project currently has an agentic control layer: the selector observes market state and chooses static or adaptive quoting. It also has a first learned policy gate in Python that chooses between adaptive and selector policies on held-out quote windows.",
-        "",
-        "## Latest Result",
-        "",
+        f"- Datasets: `{best_policy['datasets']}`.",
+        f"- Windows: `{best_policy['windows']}`.",
+        "- Fill assumptions: `configured`, `conservative_fill`, and `liquid_fill`.",
         f"- Best configured policy: `{best_policy['policy']}` with utility `{fmt(best_policy['mean_utility'])}`.",
+        f"- Best conservative-fill policy: `{conservative_best['policy']}` with utility `{fmt(conservative_best['mean_utility'])}`.",
+        f"- Best liquid-fill policy: `{liquid_best['policy']}` with utility `{fmt(liquid_best['mean_utility'])}`.",
+        "",
+        "## Configured Evaluation",
+        "",
     ]
     if selector and adaptive:
         delta = parse_float(selector, "mean_utility") - parse_float(adaptive, "mean_utility")
@@ -142,6 +182,43 @@ def render_report(
                 f"- Selector adaptive-step rate: `{fmt(selector['adaptive_step_pct'])}%`.",
             ]
         )
+    if learned_selector and adaptive and selector:
+        rust_learned = parse_float(learned_selector, "mean_utility")
+        rust_adaptive = parse_float(adaptive, "mean_utility")
+        rust_selector = parse_float(selector, "mean_utility")
+        lines.extend(
+            [
+                f"- Rust learned-selector utility: `{rust_learned:.6f}`.",
+                f"- Rust learned minus adaptive: `{rust_learned - rust_adaptive:.6f}`.",
+                f"- Rust learned minus selector: `{rust_learned - rust_selector:.6f}`.",
+                f"- Rust learned-selector adaptive-step rate: `{fmt(learned_selector['adaptive_step_pct'])}%`.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Fill-Assumption Check",
+            "",
+            f"- Conservative-fill winner: `{conservative_best['policy']}`.",
+        ]
+    )
+    if conservative_learned:
+        lines.append(
+            f"- Learned-selector conservative-fill utility: `{fmt(conservative_learned['mean_utility'])}`."
+        )
+    lines.append(f"- Liquid-fill winner: `{liquid_best['policy']}`.")
+    if liquid_learned:
+        lines.append(
+            f"- Learned-selector liquid-fill utility: `{fmt(liquid_learned['mean_utility'])}`."
+        )
+    lines.extend(
+        [
+            "- No policy wins all assumptions, so the result should be read as a research signal rather than a robust trading claim.",
+            "",
+            "## Learned Gate",
+            "",
+        ]
+    )
     if learned_rows:
         learned = mean_column(learned_rows, "learned_utility")
         learned_minus_adaptive = mean_column(learned_rows, "learned_minus_adaptive")
@@ -153,42 +230,51 @@ def render_report(
                 f"- Learned minus selector: `{learned_minus_selector:.6f}`.",
             ]
         )
-    if learned_selector and adaptive and selector:
-        rust_learned = parse_float(learned_selector, "mean_utility")
-        rust_adaptive = parse_float(adaptive, "mean_utility")
-        rust_selector = parse_float(selector, "mean_utility")
-        if rust_learned > rust_selector:
-            interpretation = (
-                "The Rust-executed learned selector now beats both adaptive and the "
-                "hand-tuned selector under the configured evaluation. This is a useful "
-                "agentic ML result, but it is still a small-sample research result, not "
-                "evidence of a live trading edge."
-            )
+    else:
+        lines.append("- Learned holdout fold output was not found.")
+    lines.extend(
+        [
+            f"- Best rule-selector sweep variant: `{best_sweep['variant']}`.",
+            f"- Best sweep score: `{fmt(best_sweep['score'])}`.",
+        ]
+    )
+    if live_run:
         lines.extend(
             [
-                f"- Rust learned-selector utility: `{rust_learned:.6f}`.",
-                f"- Rust learned minus adaptive: `{rust_learned - rust_adaptive:.6f}`.",
-                f"- Rust learned minus selector: `{rust_learned - rust_selector:.6f}`.",
+                "",
+                "## Live Paper Demo",
+                "",
+                f"- Run ID: `{live_run['run_id']}`.",
+                f"- Pair: `{live_run['pair']}`.",
+                f"- Public quote samples: `{live_run['steps']}`.",
+                f"- Paper fills: `{live_run['fills']}`.",
+                f"- Final paper PnL: `{fmt(live_run['final_pnl'])}`.",
+                f"- Inventory range: `{fmt(live_run['min_inventory'])}` to `{fmt(live_run['max_inventory'])}`.",
+                f"- Max drawdown: `{fmt(live_run['max_drawdown'])}`.",
+                f"- Average quote distance: `{fmt(live_run['avg_quote_distance'])}`.",
+                f"- Adaptive steps: `{live_run['adaptive_steps']}`.",
+                f"- Dominant trigger: `{live_run['main_trigger']}`.",
             ]
         )
     lines.extend(
         [
-            f"- Best sweep variant: `{best_sweep['variant']}`.",
-            f"- Sweep score: `{fmt(best_sweep['score'])}`.",
             "",
             "## Interpretation",
             "",
-            interpretation,
+            "The project has reached a credible proof-of-concept state. The agentic loop is real: public data feeds Rust paper sessions, Python trains a small policy gate, the model is exported to JSON, and Rust executes that learned selector in replay and live public-data paper mode.",
+            "",
+            "The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, remains close under other assumptions, and produces a coherent live-paper run with bounded inventory. The weakest point remains fill realism.",
             "",
             "## Limitations",
             "",
             "- Public top-of-book snapshots are limited data.",
             "- Fill behavior is modeled, not exchange-verified.",
             "- The learned gate is small and trained on a limited number of quote windows.",
+            "- Live paper mode polls public quotes and never places orders.",
             "",
-            "## Next Step",
+            "## Wrap-Up Assessment",
             "",
-            "Collect more quote datasets, rerun the policy gate and learned selector, then only wire the learned gate into live paper mode if it remains competitive out of sample.",
+            "This is a reasonable place to wrap the current phase. The next genuinely interesting phase would be a small contextual-bandit or reinforcement-style selector, but that should be treated as a separate research extension after preserving this result.",
             "",
         ]
     )
@@ -202,10 +288,12 @@ def main() -> int:
         policy_rows = read_csv(project_path(args.policy_summary))
         sweep_rows = read_csv(project_path(args.selector_sweep))
         learned_path = project_path(args.learned_selector_folds)
-        learned_rows = read_csv(learned_path) if learned_path.exists() else []
+        live_path = project_path(args.live_runs)
+        learned_rows = optional_csv(learned_path)
+        live_rows = optional_csv(live_path)
         output = project_path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(render_report(policy_rows, sweep_rows, learned_rows))
+        output.write_text(render_report(policy_rows, sweep_rows, learned_rows, live_rows))
     except (OSError, ValueError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

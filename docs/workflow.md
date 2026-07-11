@@ -81,6 +81,8 @@ Write the concise project status report:
 python3 research/write_project_report.py
 ```
 
+This writes [final_report.md](final_report.md).
+
 The evaluation standard is described in [research_protocol.md](research_protocol.md).
 
 ## Live Paper Mode

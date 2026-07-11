@@ -41,10 +41,11 @@ impl Default for PaperSessionConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(tag = "type")]
 pub enum PaperPolicyConfig {
     #[serde(rename = "static")]
+    #[default]
     Static,
     #[serde(rename = "adaptive")]
     Adaptive {
@@ -84,12 +85,6 @@ pub enum PaperPolicyConfig {
         adaptive_policy: PaperAdaptivePolicyConfig,
         selector_policy: PaperSelectorPolicyConfig,
     },
-}
-
-impl Default for PaperPolicyConfig {
-    fn default() -> Self {
-        Self::Static
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -264,11 +259,13 @@ impl PaperSessionRunner {
         });
         let learned_features = self.learned_features.snapshot();
         let policy_decision = apply_paper_policy(
-            decision.quote,
-            state,
-            observed_quote,
-            estimated_volatility,
-            current_drawdown,
+            PaperPolicyInput {
+                quote: decision.quote,
+                state,
+                observed_quote,
+                estimated_volatility,
+                current_drawdown,
+            },
             &self.config.policy,
             self.learned_model.as_ref(),
             learned_features,
@@ -318,18 +315,14 @@ impl PaperSessionRunner {
 }
 
 fn apply_paper_policy(
-    quote: Quote,
-    state: &SystemState,
-    observed_quote: Option<Quote>,
-    estimated_volatility: f64,
-    current_drawdown: f64,
+    input: PaperPolicyInput<'_>,
     policy: &PaperPolicyConfig,
     learned_model: Option<&LearnedPolicyModel>,
     learned_features: Option<LearnedFeatureSnapshot>,
 ) -> PaperPolicyDecision {
     match policy.clone() {
         PaperPolicyConfig::Static => PaperPolicyDecision {
-            quote,
+            quote: input.quote,
             mode: PaperPolicyMode::Static,
             trigger: PaperPolicyTrigger::None,
         },
@@ -341,10 +334,10 @@ fn apply_paper_policy(
             touch_spread_multiplier,
         } => PaperPolicyDecision {
             quote: adaptive_quote(
-                quote,
-                state,
-                observed_quote,
-                estimated_volatility,
+                input.quote,
+                input.state,
+                input.observed_quote,
+                input.estimated_volatility,
                 AdaptivePolicyParams {
                     min_spread,
                     max_spread,
@@ -367,26 +360,26 @@ fn apply_paper_policy(
             volatility_threshold,
         } => {
             let trigger = adaptive_policy_trigger(
-                state,
-                estimated_volatility,
-                current_drawdown,
+                input.state,
+                input.estimated_volatility,
+                input.current_drawdown,
                 drawdown_threshold,
                 inventory_threshold,
                 volatility_threshold,
             );
             if trigger == PaperPolicyTrigger::None {
                 PaperPolicyDecision {
-                    quote,
+                    quote: input.quote,
                     mode: PaperPolicyMode::Static,
                     trigger,
                 }
             } else {
                 PaperPolicyDecision {
                     quote: adaptive_quote(
-                        quote,
-                        state,
-                        observed_quote,
-                        estimated_volatility,
+                        input.quote,
+                        input.state,
+                        input.observed_quote,
+                        input.estimated_volatility,
                         AdaptivePolicyParams {
                             min_spread,
                             max_spread,
@@ -412,11 +405,11 @@ fn apply_paper_policy(
             drawdown_weight,
             activation_threshold,
         } => selector_policy_decision(
-            quote,
-            state,
-            observed_quote,
-            estimated_volatility,
-            current_drawdown,
+            input.quote,
+            input.state,
+            input.observed_quote,
+            input.estimated_volatility,
+            input.current_drawdown,
             AdaptivePolicyParams {
                 min_spread,
                 max_spread,
@@ -437,17 +430,22 @@ fn apply_paper_policy(
             adaptive_policy,
             selector_policy,
         } => learned_selector_policy_decision(
-            quote,
-            state,
-            observed_quote,
-            estimated_volatility,
-            current_drawdown,
+            input,
             adaptive_policy,
             selector_policy,
             learned_model.expect("learned selector model should be loaded before paper session"),
             learned_features.expect("learned selector features should be available"),
         ),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PaperPolicyInput<'a> {
+    quote: Quote,
+    state: &'a SystemState,
+    observed_quote: Option<Quote>,
+    estimated_volatility: f64,
+    current_drawdown: f64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -583,11 +581,7 @@ fn selector_policy_decision(
 }
 
 fn learned_selector_policy_decision(
-    quote: Quote,
-    state: &SystemState,
-    observed_quote: Option<Quote>,
-    estimated_volatility: f64,
-    current_drawdown: f64,
+    input: PaperPolicyInput<'_>,
     adaptive_config: PaperAdaptivePolicyConfig,
     selector_config: PaperSelectorPolicyConfig,
     model: &LearnedPolicyModel,
@@ -601,27 +595,27 @@ fn learned_selector_policy_decision(
 
     match action {
         "static" => PaperPolicyDecision {
-            quote,
+            quote: input.quote,
             mode: PaperPolicyMode::Static,
             trigger: PaperPolicyTrigger::None,
         },
         "adaptive" => PaperPolicyDecision {
             quote: adaptive_quote(
-                quote,
-                state,
-                observed_quote,
-                estimated_volatility,
+                input.quote,
+                input.state,
+                input.observed_quote,
+                input.estimated_volatility,
                 adaptive_config.into(),
             ),
             mode: PaperPolicyMode::Adaptive,
             trigger: PaperPolicyTrigger::Configured,
         },
         "selector" => selector_policy_decision(
-            quote,
-            state,
-            observed_quote,
-            estimated_volatility,
-            current_drawdown,
+            input.quote,
+            input.state,
+            input.observed_quote,
+            input.estimated_volatility,
+            input.current_drawdown,
             adaptive_config.into(),
             selector_config.into(),
         ),
@@ -1172,6 +1166,22 @@ mod tests {
         }
     }
 
+    fn paper_policy_input<'a>(
+        quote: Quote,
+        state: &'a SystemState,
+        observed_quote: Option<Quote>,
+        estimated_volatility: f64,
+        current_drawdown: f64,
+    ) -> PaperPolicyInput<'a> {
+        PaperPolicyInput {
+            quote,
+            state,
+            observed_quote,
+            estimated_volatility,
+            current_drawdown,
+        }
+    }
+
     #[test]
     fn paper_session_records_agent_decisions() {
         let events = vec![
@@ -1274,17 +1284,19 @@ mod tests {
     fn adaptive_policy_widens_toward_observed_spread() {
         let state = SystemState::new(100.0);
         let decision = apply_paper_policy(
-            Quote {
-                bid: 99.99,
-                ask: 100.01,
-            },
-            &state,
-            Some(Quote {
-                bid: 99.90,
-                ask: 100.10,
-            }),
-            0.0,
-            0.0,
+            paper_policy_input(
+                Quote {
+                    bid: 99.99,
+                    ask: 100.01,
+                },
+                &state,
+                Some(Quote {
+                    bid: 99.90,
+                    ask: 100.10,
+                }),
+                0.0,
+                0.0,
+            ),
             &PaperPolicyConfig::Adaptive {
                 min_spread: 0.02,
                 max_spread: 0.20,
@@ -1306,14 +1318,16 @@ mod tests {
         let mut state = SystemState::new(100.0);
         state.inventory = 2.0;
         let decision = apply_paper_policy(
-            Quote {
-                bid: 99.90,
-                ask: 100.10,
-            },
-            &state,
-            None,
-            0.0,
-            0.0,
+            paper_policy_input(
+                Quote {
+                    bid: 99.90,
+                    ask: 100.10,
+                },
+                &state,
+                None,
+                0.0,
+                0.0,
+            ),
             &PaperPolicyConfig::Adaptive {
                 min_spread: 0.20,
                 max_spread: 0.20,
@@ -1337,14 +1351,16 @@ mod tests {
             ask: 100.01,
         };
         let decision = apply_paper_policy(
-            input,
-            &state,
-            Some(Quote {
-                bid: 99.90,
-                ask: 100.10,
-            }),
-            0.001,
-            0.0,
+            paper_policy_input(
+                input,
+                &state,
+                Some(Quote {
+                    bid: 99.90,
+                    ask: 100.10,
+                }),
+                0.001,
+                0.0,
+            ),
             &PaperPolicyConfig::Hybrid {
                 min_spread: 0.02,
                 max_spread: 0.20,
@@ -1368,17 +1384,19 @@ mod tests {
     fn hybrid_policy_uses_adaptive_quote_when_risk_trigger_fires() {
         let state = SystemState::new(100.0);
         let decision = apply_paper_policy(
-            Quote {
-                bid: 99.99,
-                ask: 100.01,
-            },
-            &state,
-            Some(Quote {
-                bid: 99.90,
-                ask: 100.10,
-            }),
-            0.02,
-            0.0,
+            paper_policy_input(
+                Quote {
+                    bid: 99.99,
+                    ask: 100.01,
+                },
+                &state,
+                Some(Quote {
+                    bid: 99.90,
+                    ask: 100.10,
+                }),
+                0.02,
+                0.0,
+            ),
             &PaperPolicyConfig::Hybrid {
                 min_spread: 0.02,
                 max_spread: 0.20,
@@ -1406,14 +1424,16 @@ mod tests {
             ask: 100.01,
         };
         let decision = apply_paper_policy(
-            input,
-            &state,
-            Some(Quote {
-                bid: 99.99,
-                ask: 100.01,
-            }),
-            0.001,
-            0.0,
+            paper_policy_input(
+                input,
+                &state,
+                Some(Quote {
+                    bid: 99.99,
+                    ask: 100.01,
+                }),
+                0.001,
+                0.0,
+            ),
             &PaperPolicyConfig::Selector {
                 min_spread: 0.02,
                 max_spread: 0.20,
@@ -1439,17 +1459,19 @@ mod tests {
     fn selector_policy_uses_adaptive_quote_above_activation_threshold() {
         let state = SystemState::new(100.0);
         let decision = apply_paper_policy(
-            Quote {
-                bid: 99.99,
-                ask: 100.01,
-            },
-            &state,
-            Some(Quote {
-                bid: 99.90,
-                ask: 100.10,
-            }),
-            0.01,
-            0.0,
+            paper_policy_input(
+                Quote {
+                    bid: 99.99,
+                    ask: 100.01,
+                },
+                &state,
+                Some(Quote {
+                    bid: 99.90,
+                    ask: 100.10,
+                }),
+                0.01,
+                0.0,
+            ),
             &PaperPolicyConfig::Selector {
                 min_spread: 0.02,
                 max_spread: 0.20,
@@ -1497,17 +1519,19 @@ mod tests {
             },
         };
         let decision = learned_selector_policy_decision(
-            Quote {
-                bid: 99.99,
-                ask: 100.01,
-            },
-            &state,
-            Some(Quote {
-                bid: 99.90,
-                ask: 100.10,
-            }),
-            0.01,
-            0.0,
+            paper_policy_input(
+                Quote {
+                    bid: 99.99,
+                    ask: 100.01,
+                },
+                &state,
+                Some(Quote {
+                    bid: 99.90,
+                    ask: 100.10,
+                }),
+                0.01,
+                0.0,
+            ),
             PaperAdaptivePolicyConfig {
                 min_spread: 0.02,
                 max_spread: 0.20,

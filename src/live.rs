@@ -113,15 +113,15 @@ fn fetch_kraken_top_of_book(
         .call()?;
     let payload: serde_json::Value = response.into_json()?;
 
-    if let Some(errors) = payload.get("error").and_then(|value| value.as_array()) {
-        if !errors.is_empty() {
-            let message = errors
-                .iter()
-                .filter_map(|value| value.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(format!("Kraken API error: {message}").into());
-        }
+    if let Some(errors) = payload.get("error").and_then(|value| value.as_array())
+        && !errors.is_empty()
+    {
+        let message = errors
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!("Kraken API error: {message}").into());
     }
 
     let result = payload

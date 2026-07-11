@@ -64,6 +64,7 @@ cargo clippy -- -D warnings
 
 ### Docs
 
+- [Final research report](docs/final_report.md)
 - [Model assumptions](docs/model.md)
 - [Experiments and sweeps](docs/experiments.md)
 - [Live paper demo](docs/live_demo.md)
@@ -78,5 +79,5 @@ This project is developed as a learning and research effort with AI assistance f
 ### Roadmap
 
 - Preserve the final research result bundle.
-- Add one final concise result report that ties replay research, learned selection, and live-paper behavior together.
+- Treat contextual-bandit or reinforcement-style selection as a later research extension.
 - Keep improving the learned policy only when new data exposes a concrete weakness.

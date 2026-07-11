@@ -77,4 +77,6 @@ These criteria are research checks, not proof of a trading edge.
 
 ## Current Interpretation
 
-The latest result is promising because the Rust-executed learned selector leads under configured assumptions after adding fresh quote datasets. It is still a small-sample result, and liquid-fill assumptions continue to favor adaptive quoting. The next validation step is a live public-data paper demonstration, not real trading.
+The latest result is promising because the Rust-executed learned selector leads under configured assumptions after adding fresh quote datasets. It is still a small-sample result, and liquid-fill assumptions continue to favor adaptive quoting.
+
+The project has also completed a live public-data paper demonstration with the learned selector. That demo is an operational check of the full loop, not evidence of a trading edge. See [final_report.md](final_report.md) for the current wrap-up result.
