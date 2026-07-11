@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::fs;
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -40,7 +41,7 @@ impl Default for PaperSessionConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum PaperPolicyConfig {
     #[serde(rename = "static")]
@@ -77,12 +78,41 @@ pub enum PaperPolicyConfig {
         drawdown_weight: f64,
         activation_threshold: f64,
     },
+    #[serde(rename = "learned_selector")]
+    LearnedSelector {
+        model_path: String,
+        adaptive_policy: PaperAdaptivePolicyConfig,
+        selector_policy: PaperSelectorPolicyConfig,
+    },
 }
 
 impl Default for PaperPolicyConfig {
     fn default() -> Self {
         Self::Static
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PaperAdaptivePolicyConfig {
+    pub min_spread: f64,
+    pub max_spread: f64,
+    pub volatility_spread_multiplier: f64,
+    pub inventory_skew_multiplier: f64,
+    pub touch_spread_multiplier: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PaperSelectorPolicyConfig {
+    pub min_spread: f64,
+    pub max_spread: f64,
+    pub volatility_spread_multiplier: f64,
+    pub inventory_skew_multiplier: f64,
+    pub touch_spread_multiplier: f64,
+    pub volatility_weight: f64,
+    pub spread_weight: f64,
+    pub inventory_weight: f64,
+    pub drawdown_weight: f64,
+    pub activation_threshold: f64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -172,14 +202,23 @@ pub struct PaperSessionRunner {
     state: Option<SystemState>,
     previous_mid_price: Option<f64>,
     volatility: RollingVolatility,
+    learned_model: Option<LearnedPolicyModel>,
+    learned_features: RollingLearnedFeatures,
     peak_pnl: f64,
     rng: StdRng,
 }
 
 impl PaperSessionRunner {
     pub fn new(config: PaperSessionConfig) -> Self {
+        let learned_model = load_learned_policy_model(&config.policy);
+        let learned_window = learned_model
+            .as_ref()
+            .and_then(|model| model.feature_window)
+            .unwrap_or(30);
         Self {
             volatility: RollingVolatility::new(config.volatility_window),
+            learned_features: RollingLearnedFeatures::new(learned_window),
+            learned_model,
             rng: StdRng::seed_from_u64(config.seed),
             config,
             state: None,
@@ -196,6 +235,10 @@ impl PaperSessionRunner {
         let state = self
             .state
             .get_or_insert_with(|| SystemState::new(event.mid_price));
+        let mid_move = self
+            .previous_mid_price
+            .map(|previous_mid_price| (event.mid_price - previous_mid_price).abs())
+            .unwrap_or(0.0);
         if let Some(previous_mid_price) = self.previous_mid_price {
             self.volatility.push(event.mid_price - previous_mid_price);
         }
@@ -212,13 +255,23 @@ impl PaperSessionRunner {
         let decision = agent.decide(state, &context);
         let observed_quote = event_quote(event);
         let current_drawdown = (self.peak_pnl - state.pnl).max(0.0);
+        self.learned_features.push(LearnedFeatureSample {
+            estimated_volatility,
+            observed_spread: observed_quote.map(|quote| quote.spread()).unwrap_or(0.0),
+            abs_mid_move: mid_move,
+            abs_inventory: state.inventory.abs(),
+            drawdown: current_drawdown,
+        });
+        let learned_features = self.learned_features.snapshot();
         let policy_decision = apply_paper_policy(
             decision.quote,
             state,
             observed_quote,
             estimated_volatility,
             current_drawdown,
-            self.config.policy,
+            &self.config.policy,
+            self.learned_model.as_ref(),
+            learned_features,
         );
         let quote = fee_aware_quote(
             policy_decision.quote,
@@ -270,9 +323,11 @@ fn apply_paper_policy(
     observed_quote: Option<Quote>,
     estimated_volatility: f64,
     current_drawdown: f64,
-    policy: PaperPolicyConfig,
+    policy: &PaperPolicyConfig,
+    learned_model: Option<&LearnedPolicyModel>,
+    learned_features: Option<LearnedFeatureSnapshot>,
 ) -> PaperPolicyDecision {
-    match policy {
+    match policy.clone() {
         PaperPolicyConfig::Static => PaperPolicyDecision {
             quote,
             mode: PaperPolicyMode::Static,
@@ -377,6 +432,21 @@ fn apply_paper_policy(
                 activation_threshold,
             },
         ),
+        PaperPolicyConfig::LearnedSelector {
+            model_path: _,
+            adaptive_policy,
+            selector_policy,
+        } => learned_selector_policy_decision(
+            quote,
+            state,
+            observed_quote,
+            estimated_volatility,
+            current_drawdown,
+            adaptive_policy,
+            selector_policy,
+            learned_model.expect("learned selector model should be loaded before paper session"),
+            learned_features.expect("learned selector features should be available"),
+        ),
     }
 }
 
@@ -403,6 +473,56 @@ struct SelectorPolicyParams {
     inventory_weight: f64,
     drawdown_weight: f64,
     activation_threshold: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LearnedPolicyModel {
+    action_on: String,
+    action_off: String,
+    weights: LearnedFeatureWeights,
+    threshold: f64,
+    feature_scale: LearnedFeatureScale,
+    #[serde(default)]
+    feature_window: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct LearnedFeatureWeights {
+    estimated_volatility: f64,
+    observed_spread: f64,
+    max_observed_spread: f64,
+    abs_mid_move: f64,
+    abs_inventory: f64,
+    drawdown: f64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct LearnedFeatureScale {
+    estimated_volatility: f64,
+    observed_spread: f64,
+    max_observed_spread: f64,
+    abs_mid_move: f64,
+    abs_inventory: f64,
+    drawdown: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LearnedFeatureSample {
+    estimated_volatility: f64,
+    observed_spread: f64,
+    abs_mid_move: f64,
+    abs_inventory: f64,
+    drawdown: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LearnedFeatureSnapshot {
+    estimated_volatility: f64,
+    observed_spread: f64,
+    max_observed_spread: f64,
+    abs_mid_move: f64,
+    abs_inventory: f64,
+    drawdown: f64,
 }
 
 fn selector_policy_decision(
@@ -462,6 +582,104 @@ fn selector_policy_decision(
     }
 }
 
+fn learned_selector_policy_decision(
+    quote: Quote,
+    state: &SystemState,
+    observed_quote: Option<Quote>,
+    estimated_volatility: f64,
+    current_drawdown: f64,
+    adaptive_config: PaperAdaptivePolicyConfig,
+    selector_config: PaperSelectorPolicyConfig,
+    model: &LearnedPolicyModel,
+    features: LearnedFeatureSnapshot,
+) -> PaperPolicyDecision {
+    let action = if learned_policy_score(model, features) >= model.threshold {
+        model.action_on.as_str()
+    } else {
+        model.action_off.as_str()
+    };
+
+    match action {
+        "static" => PaperPolicyDecision {
+            quote,
+            mode: PaperPolicyMode::Static,
+            trigger: PaperPolicyTrigger::None,
+        },
+        "adaptive" => PaperPolicyDecision {
+            quote: adaptive_quote(
+                quote,
+                state,
+                observed_quote,
+                estimated_volatility,
+                adaptive_config.into(),
+            ),
+            mode: PaperPolicyMode::Adaptive,
+            trigger: PaperPolicyTrigger::Configured,
+        },
+        "selector" => selector_policy_decision(
+            quote,
+            state,
+            observed_quote,
+            estimated_volatility,
+            current_drawdown,
+            adaptive_config.into(),
+            selector_config.into(),
+        ),
+        other => panic!("learned selector model chose unsupported action {other:?}"),
+    }
+}
+
+fn learned_policy_score(model: &LearnedPolicyModel, features: LearnedFeatureSnapshot) -> f64 {
+    normalized_feature(
+        features.estimated_volatility,
+        model.feature_scale.estimated_volatility,
+    ) * model.weights.estimated_volatility
+        + normalized_feature(
+            features.observed_spread,
+            model.feature_scale.observed_spread,
+        ) * model.weights.observed_spread
+        + normalized_feature(
+            features.max_observed_spread,
+            model.feature_scale.max_observed_spread,
+        ) * model.weights.max_observed_spread
+        + normalized_feature(features.abs_mid_move, model.feature_scale.abs_mid_move)
+            * model.weights.abs_mid_move
+        + normalized_feature(features.abs_inventory, model.feature_scale.abs_inventory)
+            * model.weights.abs_inventory
+        + normalized_feature(features.drawdown, model.feature_scale.drawdown)
+            * model.weights.drawdown
+}
+
+fn normalized_feature(value: f64, scale: f64) -> f64 {
+    if scale <= 0.0 { 0.0 } else { value / scale }
+}
+
+fn load_learned_policy_model(policy: &PaperPolicyConfig) -> Option<LearnedPolicyModel> {
+    let PaperPolicyConfig::LearnedSelector { model_path, .. } = policy else {
+        return None;
+    };
+    let payload = fs::read_to_string(model_path).unwrap_or_else(|error| {
+        panic!("failed to read learned selector model {model_path}: {error}")
+    });
+    let model: LearnedPolicyModel = serde_json::from_str(&payload).unwrap_or_else(|error| {
+        panic!("failed to parse learned selector model {model_path}: {error}")
+    });
+    validate_learned_policy_model(model_path, &model);
+    Some(model)
+}
+
+fn validate_learned_policy_model(path: &str, model: &LearnedPolicyModel) {
+    for action in [&model.action_on, &model.action_off] {
+        match action.as_str() {
+            "static" | "adaptive" | "selector" => {}
+            other => panic!("learned selector model {path} has unsupported action {other:?}"),
+        }
+    }
+    if model.threshold < 0.0 {
+        panic!("learned selector model {path} has negative threshold");
+    }
+}
+
 fn dominant_selector_trigger(contributions: [(PaperPolicyTrigger, f64); 4]) -> PaperPolicyTrigger {
     let mut best_trigger = PaperPolicyTrigger::None;
     let mut best_value = 0.0;
@@ -481,6 +699,30 @@ fn dominant_selector_trigger(contributions: [(PaperPolicyTrigger, f64); 4]) -> P
         PaperPolicyTrigger::Multiple
     } else {
         best_trigger
+    }
+}
+
+impl From<PaperAdaptivePolicyConfig> for AdaptivePolicyParams {
+    fn from(config: PaperAdaptivePolicyConfig) -> Self {
+        Self {
+            min_spread: config.min_spread,
+            max_spread: config.max_spread,
+            volatility_spread_multiplier: config.volatility_spread_multiplier,
+            inventory_skew_multiplier: config.inventory_skew_multiplier,
+            touch_spread_multiplier: config.touch_spread_multiplier,
+        }
+    }
+}
+
+impl From<PaperSelectorPolicyConfig> for SelectorPolicyParams {
+    fn from(config: PaperSelectorPolicyConfig) -> Self {
+        Self {
+            volatility_weight: config.volatility_weight,
+            spread_weight: config.spread_weight,
+            inventory_weight: config.inventory_weight,
+            drawdown_weight: config.drawdown_weight,
+            activation_threshold: config.activation_threshold,
+        }
     }
 }
 
@@ -801,6 +1043,71 @@ impl RollingVolatility {
     }
 }
 
+struct RollingLearnedFeatures {
+    window: usize,
+    samples: Vec<LearnedFeatureSample>,
+}
+
+impl RollingLearnedFeatures {
+    fn new(window: usize) -> Self {
+        Self {
+            window: window.max(1),
+            samples: Vec::with_capacity(window.max(1)),
+        }
+    }
+
+    fn push(&mut self, sample: LearnedFeatureSample) {
+        if self.samples.len() == self.window {
+            self.samples.remove(0);
+        }
+        self.samples.push(sample);
+    }
+
+    fn snapshot(&self) -> Option<LearnedFeatureSnapshot> {
+        if self.samples.is_empty() {
+            return None;
+        }
+        let count = self.samples.len() as f64;
+        Some(LearnedFeatureSnapshot {
+            estimated_volatility: self
+                .samples
+                .iter()
+                .map(|sample| sample.estimated_volatility)
+                .sum::<f64>()
+                / count,
+            observed_spread: self
+                .samples
+                .iter()
+                .map(|sample| sample.observed_spread)
+                .sum::<f64>()
+                / count,
+            max_observed_spread: self
+                .samples
+                .iter()
+                .map(|sample| sample.observed_spread)
+                .fold(0.0, f64::max),
+            abs_mid_move: self
+                .samples
+                .iter()
+                .map(|sample| sample.abs_mid_move)
+                .sum::<f64>()
+                / count,
+            abs_inventory: self
+                .samples
+                .iter()
+                .map(|sample| sample.abs_inventory)
+                .sum::<f64>()
+                / count,
+            drawdown: self
+                .samples
+                .iter()
+                .map(|sample| sample.drawdown)
+                .sum::<f64>()
+                / count,
+        })
+    }
+}
+
 fn regime_name(regime: MarketRegime) -> &'static str {
     match regime {
         MarketRegime::LowVol => "LowVol",
@@ -978,13 +1285,15 @@ mod tests {
             }),
             0.0,
             0.0,
-            PaperPolicyConfig::Adaptive {
+            &PaperPolicyConfig::Adaptive {
                 min_spread: 0.02,
                 max_spread: 0.20,
                 volatility_spread_multiplier: 0.0,
                 inventory_skew_multiplier: 0.0,
                 touch_spread_multiplier: 0.5,
             },
+            None,
+            None,
         );
 
         assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
@@ -1005,13 +1314,15 @@ mod tests {
             None,
             0.0,
             0.0,
-            PaperPolicyConfig::Adaptive {
+            &PaperPolicyConfig::Adaptive {
                 min_spread: 0.20,
                 max_spread: 0.20,
                 volatility_spread_multiplier: 0.0,
                 inventory_skew_multiplier: 0.10,
                 touch_spread_multiplier: 0.0,
             },
+            None,
+            None,
         );
 
         assert!((decision.quote.bid - 99.70).abs() < 1e-12);
@@ -1034,7 +1345,7 @@ mod tests {
             }),
             0.001,
             0.0,
-            PaperPolicyConfig::Hybrid {
+            &PaperPolicyConfig::Hybrid {
                 min_spread: 0.02,
                 max_spread: 0.20,
                 volatility_spread_multiplier: 1.0,
@@ -1044,6 +1355,8 @@ mod tests {
                 inventory_threshold: 10.0,
                 volatility_threshold: 1.0,
             },
+            None,
+            None,
         );
 
         assert_eq!(decision.quote, input);
@@ -1066,7 +1379,7 @@ mod tests {
             }),
             0.02,
             0.0,
-            PaperPolicyConfig::Hybrid {
+            &PaperPolicyConfig::Hybrid {
                 min_spread: 0.02,
                 max_spread: 0.20,
                 volatility_spread_multiplier: 1.0,
@@ -1076,6 +1389,8 @@ mod tests {
                 inventory_threshold: 10.0,
                 volatility_threshold: 0.01,
             },
+            None,
+            None,
         );
 
         assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
@@ -1099,7 +1414,7 @@ mod tests {
             }),
             0.001,
             0.0,
-            PaperPolicyConfig::Selector {
+            &PaperPolicyConfig::Selector {
                 min_spread: 0.02,
                 max_spread: 0.20,
                 volatility_spread_multiplier: 1.0,
@@ -1111,6 +1426,8 @@ mod tests {
                 drawdown_weight: 1.0,
                 activation_threshold: 1.0,
             },
+            None,
+            None,
         );
 
         assert_eq!(decision.quote, input);
@@ -1133,7 +1450,7 @@ mod tests {
             }),
             0.01,
             0.0,
-            PaperPolicyConfig::Selector {
+            &PaperPolicyConfig::Selector {
                 min_spread: 0.02,
                 max_spread: 0.20,
                 volatility_spread_multiplier: 1.0,
@@ -1145,11 +1462,84 @@ mod tests {
                 drawdown_weight: 0.0,
                 activation_threshold: 0.10,
             },
+            None,
+            None,
         );
 
         assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
         assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);
         assert!((decision.quote.spread() - 0.11).abs() < 1e-12);
+    }
+
+    #[test]
+    fn learned_selector_uses_model_score_to_choose_selector() {
+        let state = SystemState::new(100.0);
+        let model = LearnedPolicyModel {
+            action_on: "selector".to_string(),
+            action_off: "adaptive".to_string(),
+            threshold: 0.5,
+            feature_window: Some(30),
+            weights: LearnedFeatureWeights {
+                estimated_volatility: 0.0,
+                observed_spread: 0.0,
+                max_observed_spread: 0.0,
+                abs_mid_move: 0.0,
+                abs_inventory: 1.0,
+                drawdown: 0.0,
+            },
+            feature_scale: LearnedFeatureScale {
+                estimated_volatility: 1.0,
+                observed_spread: 1.0,
+                max_observed_spread: 1.0,
+                abs_mid_move: 1.0,
+                abs_inventory: 1.0,
+                drawdown: 1.0,
+            },
+        };
+        let decision = learned_selector_policy_decision(
+            Quote {
+                bid: 99.99,
+                ask: 100.01,
+            },
+            &state,
+            Some(Quote {
+                bid: 99.90,
+                ask: 100.10,
+            }),
+            0.01,
+            0.0,
+            PaperAdaptivePolicyConfig {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+            },
+            PaperSelectorPolicyConfig {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+                volatility_weight: 20.0,
+                spread_weight: 1.0,
+                inventory_weight: 0.0,
+                drawdown_weight: 0.0,
+                activation_threshold: 0.10,
+            },
+            &model,
+            LearnedFeatureSnapshot {
+                estimated_volatility: 0.0,
+                observed_spread: 0.0,
+                max_observed_spread: 0.0,
+                abs_mid_move: 0.0,
+                abs_inventory: 1.0,
+                drawdown: 0.0,
+            },
+        );
+
+        assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
+        assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);
     }
 
     #[test]

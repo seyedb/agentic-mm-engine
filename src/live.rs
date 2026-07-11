@@ -55,7 +55,7 @@ pub fn run_kraken_paper_live(config: PaperLiveConfig) -> Result<PathBuf, Box<dyn
         order_quantity: config.quantity,
         fee_rate: config.fee_rate,
         fee_spread_multiplier: config.fee_spread_multiplier,
-        policy: config.policy,
+        policy: config.policy.clone(),
         seed: config.seed,
         fill_model: config.fill_model,
         volatility_window: config.volatility_window,

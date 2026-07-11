@@ -71,6 +71,13 @@ def adaptive_row(rows: list[dict[str, str]]) -> dict[str, str] | None:
     return None
 
 
+def learned_selector_row(rows: list[dict[str, str]]) -> dict[str, str] | None:
+    for row in rows:
+        if row["assumption"] == "configured" and row["policy"] == "learned_selector":
+            return row
+    return None
+
+
 def best_sweep_row(rows: list[dict[str, str]]) -> dict[str, str]:
     if not rows:
         raise ValueError("selector sweep has no rows")
@@ -95,6 +102,7 @@ def render_report(
     best_policy = best_configured_policy(policy_rows)
     selector = selector_row(policy_rows)
     adaptive = adaptive_row(policy_rows)
+    learned_selector = learned_selector_row(policy_rows)
     best_sweep = best_sweep_row(sweep_rows)
 
     lines = [
@@ -137,6 +145,17 @@ def render_report(
                 f"- Learned gate holdout utility: `{learned:.6f}`.",
                 f"- Learned minus adaptive: `{learned_minus_adaptive:.6f}`.",
                 f"- Learned minus selector: `{learned_minus_selector:.6f}`.",
+            ]
+        )
+    if learned_selector and adaptive and selector:
+        rust_learned = parse_float(learned_selector, "mean_utility")
+        rust_adaptive = parse_float(adaptive, "mean_utility")
+        rust_selector = parse_float(selector, "mean_utility")
+        lines.extend(
+            [
+                f"- Rust learned-selector utility: `{rust_learned:.6f}`.",
+                f"- Rust learned minus adaptive: `{rust_learned - rust_adaptive:.6f}`.",
+                f"- Rust learned minus selector: `{rust_learned - rust_selector:.6f}`.",
             ]
         )
     lines.extend(

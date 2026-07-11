@@ -42,7 +42,7 @@ python3 research/plot_paper_session.py target/reports/kraken_solusd_selector_mak
 
 ## Evaluate Policies
 
-The main evaluation gate compares static, adaptive, hybrid, and selector policies across collected quote datasets and multiple fill assumptions:
+The main evaluation gate compares static, adaptive, hybrid, selector, and, when a learned model exists, learned-selector policies across collected quote datasets and multiple fill assumptions:
 
 ```bash
 python3 research/policy_evaluation_gate.py
@@ -67,6 +67,12 @@ Train the first learned policy gate after the policy gate has produced window re
 
 ```bash
 python3 research/train_policy_selector.py
+```
+
+Then rerun the gate so Rust loads the Python-trained model and evaluates it as a normal paper policy:
+
+```bash
+python3 research/policy_evaluation_gate.py
 ```
 
 Write the concise project status report:

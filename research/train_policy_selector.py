@@ -75,6 +75,12 @@ def parse_args() -> argparse.Namespace:
         default="static",
         help="Policy output used to compute window features before training the gate.",
     )
+    parser.add_argument(
+        "--feature-window",
+        type=int,
+        default=30,
+        help="Rolling feature window used by Rust when applying the learned gate.",
+    )
     parser.add_argument("--model-output", type=Path, default=DEFAULT_MODEL_OUTPUT)
     parser.add_argument("--folds-output", type=Path, default=DEFAULT_FOLDS_OUTPUT)
     parser.add_argument("--report-output", type=Path, default=DEFAULT_REPORT_OUTPUT)
@@ -325,12 +331,14 @@ def write_model(
     examples: list[Example],
     train_utility: float,
     feature_policy: str,
+    feature_window: int,
 ) -> None:
     payload = {
         "model_type": "threshold_policy_gate",
         "action_on": model.action_on,
         "action_off": model.action_off,
         "feature_policy": feature_policy,
+        "feature_window": feature_window,
         "features": list(FEATURES),
         "weights": model.weights,
         "threshold": model.threshold,
@@ -482,6 +490,7 @@ def main() -> None:
         examples,
         train_utility,
         args.feature_policy,
+        args.feature_window,
     )
     write_folds(project_path(args.folds_output), folds)
     write_report(

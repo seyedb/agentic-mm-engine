@@ -20,6 +20,7 @@ DEFAULT_STATIC_CONFIG = Path("configs/runs/kraken_solusd_maker_fee_paper_session
 DEFAULT_ADAPTIVE_CONFIG = Path("configs/runs/kraken_solusd_adaptive_maker_fee_paper_session.json")
 DEFAULT_HYBRID_CONFIG = Path("configs/runs/kraken_solusd_hybrid_maker_fee_paper_session.json")
 DEFAULT_SELECTOR_CONFIG = Path("configs/runs/kraken_solusd_selector_maker_fee_paper_session.json")
+DEFAULT_LEARNED_CONFIG = Path("configs/runs/kraken_solusd_learned_selector_maker_fee_paper_session.json")
 DEFAULT_WORK_DIR = Path("target/research/policy_gate")
 DEFAULT_DATASET_OUTPUT = Path("target/research/policy_gate_dataset_summary.csv")
 DEFAULT_WINDOW_OUTPUT = Path("target/research/policy_gate_window_results.csv")
@@ -153,6 +154,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--adaptive-config", type=Path, default=DEFAULT_ADAPTIVE_CONFIG)
     parser.add_argument("--hybrid-config", type=Path, default=DEFAULT_HYBRID_CONFIG)
     parser.add_argument("--selector-config", type=Path, default=DEFAULT_SELECTOR_CONFIG)
+    parser.add_argument("--learned-config", type=Path, default=DEFAULT_LEARNED_CONFIG)
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIR)
     parser.add_argument("--dataset-output", type=Path, default=DEFAULT_DATASET_OUTPUT)
     parser.add_argument("--window-output", type=Path, default=DEFAULT_WINDOW_OUTPUT)
@@ -282,14 +284,31 @@ def load_policy_configs(args: argparse.Namespace) -> list[tuple[str, dict[str, A
         project_path(args.adaptive_config),
         project_path(args.hybrid_config),
         project_path(args.selector_config),
+        project_path(args.learned_config),
     ]
     configs = []
     for path in paths:
         config = load_json(path)
         if config.get("type") != "paper_session":
             raise ValueError(f"{path}: config type must be paper_session")
+        if should_skip_missing_learned_model(path, config):
+            continue
         configs.append((path.stem, config))
     return configs
+
+
+def should_skip_missing_learned_model(path: Path, config: dict[str, Any]) -> bool:
+    policy = config.get("policy", {})
+    if not isinstance(policy, dict) or policy.get("type") != "learned_selector":
+        return False
+    model_path = project_path(Path(str(policy.get("model_path", ""))))
+    if model_path.exists():
+        return False
+    print(
+        f"Skipping {path.name}: learned selector model not found at {model_path}",
+        file=sys.stderr,
+    )
+    return True
 
 
 def config_for_assumption(config: dict[str, Any], assumption: FillAssumption) -> dict[str, Any]:
@@ -804,6 +823,7 @@ def render_report(
     configured_hybrid = first_summary(configured, "hybrid")
     configured_selector = first_summary(configured, "selector")
     stable_winner = stability_winner(summaries, assumptions)
+    policies = ", ".join(sorted({summary.policy for summary in summaries}))
     lines = [
         "# Policy Evaluation Gate",
         "",
@@ -811,7 +831,7 @@ def render_report(
         "",
         f"- Datasets: {len(datasets)}",
         f"- Fill assumptions: {', '.join(assumption.name for assumption in assumptions)}",
-        "- Policies: static, adaptive, hybrid, selector",
+        f"- Policies: {policies}",
         f"- Window size: {args.window_size}",
         f"- Step size: {args.step_size}",
         f"- Utility: `pnl - {format_float(args.drawdown_weight)} * drawdown - "

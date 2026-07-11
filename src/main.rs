@@ -412,7 +412,7 @@ impl RunSpec {
                 validate_positive_f64("quantity", *quantity)?;
                 validate_non_negative_f64("fee_rate", *fee_rate)?;
                 validate_non_negative_f64("fee_spread_multiplier", *fee_spread_multiplier)?;
-                validate_paper_policy(*policy)?;
+                validate_paper_policy(policy)?;
                 validate_paper_fill_model(*fill_model)?;
             }
             Self::PaperLive {
@@ -439,7 +439,7 @@ impl RunSpec {
                 validate_positive_f64("quantity", *quantity)?;
                 validate_non_negative_f64("fee_rate", *fee_rate)?;
                 validate_non_negative_f64("fee_spread_multiplier", *fee_spread_multiplier)?;
-                validate_paper_policy(*policy)?;
+                validate_paper_policy(policy)?;
                 validate_paper_fill_model(*fill_model)?;
                 validate_positive_usize("samples", *samples)?;
                 validate_non_negative_f64("interval_seconds", *interval_seconds)?;
@@ -593,8 +593,8 @@ fn validate_controller(controller: &RuleBasedControllerParams) -> Result<(), Str
     validate_non_negative_f64("controller.inventory_limit", controller.inventory_limit)
 }
 
-fn validate_paper_policy(policy: PaperPolicyConfig) -> Result<(), String> {
-    match policy {
+fn validate_paper_policy(policy: &PaperPolicyConfig) -> Result<(), String> {
+    match policy.clone() {
         PaperPolicyConfig::Static => Ok(()),
         PaperPolicyConfig::Adaptive {
             min_spread,
@@ -687,6 +687,88 @@ fn validate_paper_policy(policy: PaperPolicyConfig) -> Result<(), String> {
             validate_non_negative_f64("policy.drawdown_weight", drawdown_weight)?;
             validate_non_negative_f64("policy.activation_threshold", activation_threshold)
         }
+        PaperPolicyConfig::LearnedSelector {
+            model_path,
+            adaptive_policy,
+            selector_policy,
+        } => {
+            if model_path.trim().is_empty() {
+                return Err("policy.model_path must not be empty".to_string());
+            }
+            validate_positive_f64(
+                "policy.adaptive_policy.min_spread",
+                adaptive_policy.min_spread,
+            )?;
+            validate_positive_f64(
+                "policy.adaptive_policy.max_spread",
+                adaptive_policy.max_spread,
+            )?;
+            if adaptive_policy.max_spread < adaptive_policy.min_spread {
+                return Err(
+                    "policy.adaptive_policy.max_spread must be greater than or equal to policy.adaptive_policy.min_spread"
+                        .to_string(),
+                );
+            }
+            validate_non_negative_f64(
+                "policy.adaptive_policy.volatility_spread_multiplier",
+                adaptive_policy.volatility_spread_multiplier,
+            )?;
+            validate_non_negative_f64(
+                "policy.adaptive_policy.inventory_skew_multiplier",
+                adaptive_policy.inventory_skew_multiplier,
+            )?;
+            validate_non_negative_f64(
+                "policy.adaptive_policy.touch_spread_multiplier",
+                adaptive_policy.touch_spread_multiplier,
+            )?;
+
+            validate_positive_f64(
+                "policy.selector_policy.min_spread",
+                selector_policy.min_spread,
+            )?;
+            validate_positive_f64(
+                "policy.selector_policy.max_spread",
+                selector_policy.max_spread,
+            )?;
+            if selector_policy.max_spread < selector_policy.min_spread {
+                return Err(
+                    "policy.selector_policy.max_spread must be greater than or equal to policy.selector_policy.min_spread"
+                        .to_string(),
+                );
+            }
+            validate_non_negative_f64(
+                "policy.selector_policy.volatility_spread_multiplier",
+                selector_policy.volatility_spread_multiplier,
+            )?;
+            validate_non_negative_f64(
+                "policy.selector_policy.inventory_skew_multiplier",
+                selector_policy.inventory_skew_multiplier,
+            )?;
+            validate_non_negative_f64(
+                "policy.selector_policy.touch_spread_multiplier",
+                selector_policy.touch_spread_multiplier,
+            )?;
+            validate_non_negative_f64(
+                "policy.selector_policy.volatility_weight",
+                selector_policy.volatility_weight,
+            )?;
+            validate_non_negative_f64(
+                "policy.selector_policy.spread_weight",
+                selector_policy.spread_weight,
+            )?;
+            validate_non_negative_f64(
+                "policy.selector_policy.inventory_weight",
+                selector_policy.inventory_weight,
+            )?;
+            validate_non_negative_f64(
+                "policy.selector_policy.drawdown_weight",
+                selector_policy.drawdown_weight,
+            )?;
+            validate_non_negative_f64(
+                "policy.selector_policy.activation_threshold",
+                selector_policy.activation_threshold,
+            )
+        }
     }
 }
 
@@ -733,7 +815,7 @@ fn run_paper_session_options(options: PaperSessionOptions) -> Result<(), Box<dyn
             order_quantity: options.quantity,
             fee_rate: options.fee_rate,
             fee_spread_multiplier: options.fee_spread_multiplier,
-            policy: options.policy,
+            policy: options.policy.clone(),
             seed: options.seed,
             fill_model: options.fill_model,
             volatility_window: options.volatility_window,
