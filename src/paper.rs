@@ -53,6 +53,17 @@ pub enum PaperPolicyConfig {
         inventory_skew_multiplier: f64,
         touch_spread_multiplier: f64,
     },
+    #[serde(rename = "hybrid")]
+    Hybrid {
+        min_spread: f64,
+        max_spread: f64,
+        volatility_spread_multiplier: f64,
+        inventory_skew_multiplier: f64,
+        touch_spread_multiplier: f64,
+        drawdown_threshold: f64,
+        inventory_threshold: f64,
+        volatility_threshold: f64,
+    },
 }
 
 impl Default for PaperPolicyConfig {
@@ -168,11 +179,13 @@ impl PaperSessionRunner {
         };
         let decision = agent.decide(state, &context);
         let observed_quote = event_quote(event);
+        let current_drawdown = (self.peak_pnl - state.pnl).max(0.0);
         let policy_quote = apply_paper_policy(
             decision.quote,
             state,
             observed_quote,
             estimated_volatility,
+            current_drawdown,
             self.config.policy,
         );
         let quote = fee_aware_quote(
@@ -222,6 +235,7 @@ fn apply_paper_policy(
     state: &SystemState,
     observed_quote: Option<Quote>,
     estimated_volatility: f64,
+    current_drawdown: f64,
     policy: PaperPolicyConfig,
 ) -> Quote {
     match policy {
@@ -245,6 +259,41 @@ fn apply_paper_policy(
                 touch_spread_multiplier,
             },
         ),
+        PaperPolicyConfig::Hybrid {
+            min_spread,
+            max_spread,
+            volatility_spread_multiplier,
+            inventory_skew_multiplier,
+            touch_spread_multiplier,
+            drawdown_threshold,
+            inventory_threshold,
+            volatility_threshold,
+        } => {
+            if should_use_adaptive_policy(
+                state,
+                estimated_volatility,
+                current_drawdown,
+                drawdown_threshold,
+                inventory_threshold,
+                volatility_threshold,
+            ) {
+                adaptive_quote(
+                    quote,
+                    state,
+                    observed_quote,
+                    estimated_volatility,
+                    AdaptivePolicyParams {
+                        min_spread,
+                        max_spread,
+                        volatility_spread_multiplier,
+                        inventory_skew_multiplier,
+                        touch_spread_multiplier,
+                    },
+                )
+            } else {
+                quote
+            }
+        }
     }
 }
 
@@ -255,6 +304,19 @@ struct AdaptivePolicyParams {
     volatility_spread_multiplier: f64,
     inventory_skew_multiplier: f64,
     touch_spread_multiplier: f64,
+}
+
+fn should_use_adaptive_policy(
+    state: &SystemState,
+    estimated_volatility: f64,
+    current_drawdown: f64,
+    drawdown_threshold: f64,
+    inventory_threshold: f64,
+    volatility_threshold: f64,
+) -> bool {
+    current_drawdown >= drawdown_threshold
+        || state.inventory.abs() >= inventory_threshold
+        || estimated_volatility >= volatility_threshold
 }
 
 fn adaptive_quote(
@@ -703,6 +765,7 @@ mod tests {
                 ask: 100.10,
             }),
             0.0,
+            0.0,
             PaperPolicyConfig::Adaptive {
                 min_spread: 0.02,
                 max_spread: 0.20,
@@ -727,6 +790,7 @@ mod tests {
             &state,
             None,
             0.0,
+            0.0,
             PaperPolicyConfig::Adaptive {
                 min_spread: 0.20,
                 max_spread: 0.20,
@@ -738,6 +802,67 @@ mod tests {
 
         assert!((quote.bid - 99.70).abs() < 1e-12);
         assert!((quote.ask - 99.90).abs() < 1e-12);
+    }
+
+    #[test]
+    fn hybrid_policy_keeps_static_quote_when_risk_is_low() {
+        let state = SystemState::new(100.0);
+        let input = Quote {
+            bid: 99.99,
+            ask: 100.01,
+        };
+        let quote = apply_paper_policy(
+            input,
+            &state,
+            Some(Quote {
+                bid: 99.90,
+                ask: 100.10,
+            }),
+            0.001,
+            0.0,
+            PaperPolicyConfig::Hybrid {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.10,
+                touch_spread_multiplier: 0.5,
+                drawdown_threshold: 1.0,
+                inventory_threshold: 10.0,
+                volatility_threshold: 1.0,
+            },
+        );
+
+        assert_eq!(quote, input);
+    }
+
+    #[test]
+    fn hybrid_policy_uses_adaptive_quote_when_risk_trigger_fires() {
+        let state = SystemState::new(100.0);
+        let quote = apply_paper_policy(
+            Quote {
+                bid: 99.99,
+                ask: 100.01,
+            },
+            &state,
+            Some(Quote {
+                bid: 99.90,
+                ask: 100.10,
+            }),
+            0.02,
+            0.0,
+            PaperPolicyConfig::Hybrid {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+                drawdown_threshold: 1.0,
+                inventory_threshold: 10.0,
+                volatility_threshold: 0.01,
+            },
+        );
+
+        assert!((quote.spread() - 0.12).abs() < 1e-12);
     }
 
     #[test]

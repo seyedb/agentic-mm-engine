@@ -621,6 +621,37 @@ fn validate_paper_policy(policy: PaperPolicyConfig) -> Result<(), String> {
             )?;
             validate_non_negative_f64("policy.touch_spread_multiplier", touch_spread_multiplier)
         }
+        PaperPolicyConfig::Hybrid {
+            min_spread,
+            max_spread,
+            volatility_spread_multiplier,
+            inventory_skew_multiplier,
+            touch_spread_multiplier,
+            drawdown_threshold,
+            inventory_threshold,
+            volatility_threshold,
+        } => {
+            validate_positive_f64("policy.min_spread", min_spread)?;
+            validate_positive_f64("policy.max_spread", max_spread)?;
+            if max_spread < min_spread {
+                return Err(
+                    "policy.max_spread must be greater than or equal to policy.min_spread"
+                        .to_string(),
+                );
+            }
+            validate_non_negative_f64(
+                "policy.volatility_spread_multiplier",
+                volatility_spread_multiplier,
+            )?;
+            validate_non_negative_f64(
+                "policy.inventory_skew_multiplier",
+                inventory_skew_multiplier,
+            )?;
+            validate_non_negative_f64("policy.touch_spread_multiplier", touch_spread_multiplier)?;
+            validate_non_negative_f64("policy.drawdown_threshold", drawdown_threshold)?;
+            validate_non_negative_f64("policy.inventory_threshold", inventory_threshold)?;
+            validate_non_negative_f64("policy.volatility_threshold", volatility_threshold)
+        }
     }
 }
 

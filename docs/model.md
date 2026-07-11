@@ -106,7 +106,7 @@ This is intentionally simple. The controller is the decision layer where later p
 
 ## Paper Policy
 
-Paper sessions can run with either a static policy or a simple adaptive policy. The static policy uses the controller quote unchanged. The adaptive policy widens quotes using observed top-of-book spread and estimated volatility, then skews the quote center away from current inventory.
+Paper sessions can run with static, adaptive, or hybrid policies. The static policy uses the controller quote unchanged. The adaptive policy widens quotes using observed top-of-book spread and estimated volatility, then skews the quote center away from current inventory. The hybrid policy keeps the static quote during normal conditions and switches to the adaptive quote when drawdown, inventory, or volatility crosses configured thresholds.
 
 This policy layer is deliberately small: it gives the project a clear agent interface for choosing quote behavior while leaving execution, accounting, and reporting unchanged.
 

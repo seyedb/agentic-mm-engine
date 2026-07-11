@@ -193,6 +193,7 @@ This does not place orders. It only records public quote snapshots, agent quotes
 The default live config keeps quoting active. Use `configs/runs/kraken_solusd_fee_aware_paper_live.json` to test the fee-aware spread floor separately.
 Use `configs/runs/kraken_solusd_maker_fee_paper_live.json` to test the same quoting logic under a lower passive maker-fee assumption.
 Use `configs/runs/kraken_solusd_adaptive_maker_fee_paper_live.json` to test the first adaptive paper policy.
+Use `configs/runs/kraken_solusd_hybrid_maker_fee_paper_live.json` to test static quoting with adaptive risk triggers.
 
 Compare paper-session config assumptions on the same quote replay:
 
@@ -210,6 +211,7 @@ Evaluate paper policies across quote-data windows:
 python3 research/evaluate_paper_policies.py \
   configs/runs/kraken_solusd_maker_fee_paper_session.json \
   configs/runs/kraken_solusd_adaptive_maker_fee_paper_session.json \
+  configs/runs/kraken_solusd_hybrid_maker_fee_paper_session.json \
   --window-size 10 \
   --step-size 10
 ```
