@@ -30,14 +30,14 @@ python3 research/fetch_public_events.py --pair SOLUSD --bars 120 --out data/krak
 Paper sessions replay public data through the Rust engine and record quotes, fills, inventory, PnL, drawdown, policy mode, and policy trigger:
 
 ```bash
-cargo run -- run configs/runs/kraken_solusd_selector_maker_fee_paper_session.json
+cargo run -- run configs/runs/kraken_solusd_learned_selector_maker_fee_paper_session.json
 ```
 
 Analyze or visualize one session:
 
 ```bash
-python3 research/analyze_paper_session.py target/reports/kraken_solusd_selector_maker_fee_paper_session.csv
-python3 research/plot_paper_session.py target/reports/kraken_solusd_selector_maker_fee_paper_session.csv
+python3 research/analyze_paper_session.py target/reports/kraken_solusd_learned_selector_maker_fee_paper_session.csv
+python3 research/plot_paper_session.py target/reports/kraken_solusd_learned_selector_maker_fee_paper_session.csv
 ```
 
 ## Evaluate Policies
@@ -100,7 +100,7 @@ python3 research/run_paper_live_report.py configs/runs/kraken_solusd_learned_sel
 
 See [live_demo.md](live_demo.md) for the latest learned-selector live-paper demonstration.
 
-Compare preserved live runs and paper-fill calibrations:
+Optional live-run comparison/calibration helpers:
 
 ```bash
 python3 research/compare_paper_live_runs.py

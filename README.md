@@ -17,43 +17,40 @@ The project now includes an agentic proof of concept: Python trains a small poli
 - Trains a small Python learned gate and exports it back to Rust.
 - Evaluates policy robustness across multiple fill assumptions.
 
-### Run
-
-```bash
-cargo run
-cargo run -- run configs/runs/sample_replay.json
-cargo run -- run configs/runs/sample_replay_sweep.json
-cargo run -- run configs/runs/sample_paper_session.json
-cargo run -- replay data/sample_events.csv
-cargo run -- replay-sweep data/sample_events.csv
-cargo run -- configs/mixed_regime_adaptive_sweep.json
-cargo run -- configs/*.json
-python3 research/compare_strategy_sweeps.py
-```
-
-The default config is `configs/baseline_sweep.json`.
-
-Fetch recent public candle data for replay:
-
-```bash
-python3 research/fetch_public_events.py --pair SOLUSD --bars 120 --out data/kraken_solusd_events.csv
-```
-
-Run configs live in `configs/runs/`. Set the `data` field to the CSV you want to replay, then run:
-
-```bash
-cargo run -- run configs/runs/sample_replay.json
-cargo run -- run configs/runs/sample_replay_sweep.json
-cargo run -- run configs/runs/sample_paper_session.json
-```
-
-Run the current paper-policy research loop after collecting quote datasets:
+### Quickstart
 
 ```bash
 python3 research/policy_evaluation_gate.py
 python3 research/train_policy_selector.py
 python3 research/policy_evaluation_gate.py
 python3 research/write_project_report.py
+```
+
+Run the learned selector against live public quotes in paper mode:
+
+```bash
+python3 research/run_paper_live_report.py configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live.json \
+  --run-id solusd_demo
+```
+
+### Current Result
+
+Latest seven-dataset research report:
+
+- `learned_selector` configured utility: `0.000611`
+- `selector` configured utility: `0.000521`
+- `adaptive` configured utility: `0.000177`
+- `learned_selector` remains behind `adaptive` under the liquid-fill assumption.
+
+This is a small-sample research result, not evidence of a live trading edge.
+
+### Other Runs
+
+```bash
+cargo run -- run configs/runs/sample_replay.json
+cargo run -- run configs/runs/sample_replay_sweep.json
+cargo run -- run configs/runs/sample_paper_session.json
+python3 research/collect_quote_dataset.py --pair SOLUSD --samples 120 --interval-seconds 2 --evaluate
 ```
 
 ### Verify
@@ -78,6 +75,6 @@ This project is developed as a learning and research effort with AI assistance f
 
 ### Roadmap
 
-- Consolidate the final research protocol and result bundle.
-- Run a live public-data paper demonstration with the learned selector.
+- Preserve the final research result bundle.
+- Compare one longer live-paper learned-selector run against the short demo.
 - Keep improving the learned policy only when new data exposes a concrete weakness.
