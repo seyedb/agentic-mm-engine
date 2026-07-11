@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Train a small policy-selection gate from paper-session window results."""
+"""Train a logistic-regression policy selector from paper-session window results."""
 
 from __future__ import annotations
 
 import argparse
 import csv
-import itertools
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
@@ -38,10 +38,13 @@ class Example:
 
 @dataclass(frozen=True)
 class GateModel:
+    model_type: str
     action_on: str
     action_off: str
     weights: dict[str, float]
+    intercept: float
     threshold: float
+    probability_threshold: float
     feature_scale: dict[str, float]
 
 
@@ -66,7 +69,7 @@ class FoldResult:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Train a simple threshold gate that chooses between two paper policies "
+            "Train a logistic-regression gate that chooses between two paper policies "
             "from quote-window features."
         )
     )
@@ -80,6 +83,36 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.00025,
         help="Require this much action-on utility advantage before labeling a selector opportunity.",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=0.8,
+        help="Gradient-descent learning rate for logistic regression.",
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=6000,
+        help="Gradient-descent iterations for logistic regression.",
+    )
+    parser.add_argument(
+        "--l2",
+        type=float,
+        default=0.01,
+        help="L2 regularization strength for logistic regression weights.",
+    )
+    parser.add_argument(
+        "--probability-threshold",
+        type=float,
+        default=0.5,
+        help="Choose action-on when predicted probability is at least this value.",
+    )
+    parser.add_argument(
+        "--class-weight",
+        choices=("balanced", "none"),
+        default="balanced",
+        help="Use balanced logistic-regression class weights for imbalanced labels.",
     )
     parser.add_argument(
         "--feature-policy",
@@ -238,37 +271,26 @@ def normalize_examples(examples: list[Example], scale: dict[str, float]) -> list
     return normalized
 
 
-def candidate_models(
-    action_on: str,
-    action_off: str,
-    scale: dict[str, float],
-) -> list[GateModel]:
-    weight_grid = (-8.0, -4.0, -2.0, -1.0, -0.5, -0.25, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
-    thresholds = (-2.0, -1.5, -1.0, -0.75, -0.5, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0)
-    models = [
-        GateModel(action_on, action_off, {feature: 0.0 for feature in FEATURES}, 0.0, scale),
-        GateModel(action_on, action_off, {feature: 0.0 for feature in FEATURES}, 1.0, scale),
-    ]
-
-    feature_sets = [(feature,) for feature in FEATURES]
-    feature_sets.extend(itertools.combinations(FEATURES, 2))
-    for selected_features in feature_sets:
-        for weights in itertools.product(weight_grid, repeat=len(selected_features)):
-            model_weights = {feature: 0.0 for feature in FEATURES}
-            for feature, weight in zip(selected_features, weights):
-                model_weights[feature] = weight
-            for threshold in thresholds:
-                models.append(
-                    GateModel(action_on, action_off, model_weights, threshold, scale)
-                )
-    return models
-
-
 def choose_action(model: GateModel, features: dict[str, float]) -> str:
-    score = sum(model.weights[feature] * features[feature] for feature in FEATURES)
-    if score >= model.threshold:
+    if predict_probability(model, features) >= model.probability_threshold:
         return model.action_on
     return model.action_off
+
+
+def predict_probability(model: GateModel, features: dict[str, float]) -> float:
+    return sigmoid(linear_score(model, features))
+
+
+def linear_score(model: GateModel, features: dict[str, float]) -> float:
+    return model.intercept + sum(model.weights[feature] * features[feature] for feature in FEATURES)
+
+
+def sigmoid(value: float) -> float:
+    if value >= 0.0:
+        z = math.exp(-value)
+        return 1.0 / (1.0 + z)
+    z = math.exp(value)
+    return z / (1.0 + z)
 
 
 def target_action(
@@ -332,17 +354,42 @@ def evaluate_model(
 
 
 def training_score(model: GateModel, examples: list[Example], margin: float) -> float:
-    score = 0.0
+    loss = 0.0
+    class_weights = class_weights_for_examples(
+        examples, model.action_on, model.action_off, margin, "balanced"
+    )
     for example in examples:
-        action = choose_action(model, example.features)
-        target = target_action(example, model.action_on, model.action_off, margin)
-        advantage = abs(example.utilities[model.action_on] - example.utilities[model.action_off])
-        weight = max(advantage, margin)
-        if action == target:
-            score += weight
-        else:
-            score -= weight
-    return score / len(examples) if examples else 0.0
+        label = target_label(example, model.action_on, model.action_off, margin)
+        probability = predict_probability(model, example.features)
+        probability = min(max(probability, 1e-12), 1.0 - 1e-12)
+        loss += class_weights[label] * (
+            -(label * math.log(probability) + (1.0 - label) * math.log(1.0 - probability))
+        )
+    return -loss / len(examples) if examples else 0.0
+
+
+def target_label(example: Example, action_on: str, action_off: str, margin: float) -> float:
+    return 1.0 if target_action(example, action_on, action_off, margin) == action_on else 0.0
+
+
+def class_weights_for_examples(
+    examples: list[Example],
+    action_on: str,
+    action_off: str,
+    margin: float,
+    class_weight: str,
+) -> dict[float, float]:
+    if class_weight == "none":
+        return {0.0: 1.0, 1.0: 1.0}
+
+    positives = sum(target_label(example, action_on, action_off, margin) for example in examples)
+    negatives = len(examples) - positives
+    if positives == 0 or negatives == 0:
+        return {0.0: 1.0, 1.0: 1.0}
+    return {
+        0.0: len(examples) / (2.0 * negatives),
+        1.0: len(examples) / (2.0 * positives),
+    }
 
 
 def train_model(
@@ -351,28 +398,62 @@ def train_model(
     action_off: str,
     scale: dict[str, float],
     margin: float,
+    learning_rate: float,
+    iterations: int,
+    l2: float,
+    probability_threshold: float,
+    class_weight: str,
 ) -> tuple[GateModel, float, float]:
-    best_model = None
-    best_score = None
-    best_utility = 0.0
-    for model in candidate_models(action_on, action_off, scale):
-        score = training_score(model, examples, margin)
-        (
-            utility,
-            _action_on_count,
-            _action_off_count,
-            _opportunities,
-            _missed_opportunities,
-            _target_accuracy,
-            _captured_advantage,
-        ) = evaluate_model(model, examples, margin)
-        if best_score is None or score > best_score or (score == best_score and utility > best_utility):
-            best_model = model
-            best_score = score
-            best_utility = utility
-    assert best_model is not None
-    assert best_score is not None
-    return best_model, best_utility, best_score
+    if not examples:
+        raise ValueError("cannot train logistic regression without examples")
+
+    weights = {feature: 0.0 for feature in FEATURES}
+    positive_rate = sum(target_label(example, action_on, action_off, margin) for example in examples) / len(examples)
+    intercept = math.log((positive_rate + 1e-6) / (1.0 - positive_rate + 1e-6))
+    class_weights = class_weights_for_examples(examples, action_on, action_off, margin, class_weight)
+
+    for _iteration in range(iterations):
+        intercept_gradient = 0.0
+        weight_gradients = {feature: 0.0 for feature in FEATURES}
+        for example in examples:
+            label = target_label(example, action_on, action_off, margin)
+            score = intercept + sum(weights[feature] * example.features[feature] for feature in FEATURES)
+            error = class_weights[label] * (sigmoid(score) - label)
+            intercept_gradient += error
+            for feature in FEATURES:
+                weight_gradients[feature] += error * example.features[feature]
+
+        scale_factor = 1.0 / len(examples)
+        intercept -= learning_rate * intercept_gradient * scale_factor
+        for feature in FEATURES:
+            gradient = weight_gradients[feature] * scale_factor + l2 * weights[feature]
+            weights[feature] -= learning_rate * gradient
+
+    model = GateModel(
+        model_type="logistic_regression_policy_gate",
+        action_on=action_on,
+        action_off=action_off,
+        weights=weights,
+        intercept=intercept,
+        threshold=logit(probability_threshold),
+        probability_threshold=probability_threshold,
+        feature_scale=scale,
+    )
+    (
+        train_utility,
+        _action_on_count,
+        _action_off_count,
+        _opportunities,
+        _missed_opportunities,
+        _target_accuracy,
+        _captured_advantage,
+    ) = evaluate_model(model, examples, margin)
+    return model, train_utility, training_score(model, examples, margin)
+
+
+def logit(probability: float) -> float:
+    probability = min(max(probability, 1e-12), 1.0 - 1e-12)
+    return math.log(probability / (1.0 - probability))
 
 
 def leave_one_dataset_out(
@@ -381,13 +462,29 @@ def leave_one_dataset_out(
     action_off: str,
     scale: dict[str, float],
     margin: float,
+    learning_rate: float,
+    iterations: int,
+    l2: float,
+    probability_threshold: float,
+    class_weight: str,
 ) -> list[FoldResult]:
     folds = []
     run_ids = sorted({example.run_id for example in examples})
     for holdout in run_ids:
         train = [example for example in examples if example.run_id != holdout]
         test = [example for example in examples if example.run_id == holdout]
-        model, train_utility, train_score = train_model(train, action_on, action_off, scale, margin)
+        model, train_utility, train_score = train_model(
+            train,
+            action_on,
+            action_off,
+            scale,
+            margin,
+            learning_rate,
+            iterations,
+            l2,
+            probability_threshold,
+            class_weight,
+        )
         (
             learned_utility,
             action_on_count,
@@ -431,9 +528,13 @@ def write_model(
     feature_policy: str,
     feature_window: int,
     selection_margin: float,
+    learning_rate: float,
+    iterations: int,
+    l2: float,
+    class_weight: str,
 ) -> None:
     payload = {
-        "model_type": "threshold_policy_gate",
+        "model_type": model.model_type,
         "action_on": model.action_on,
         "action_off": model.action_off,
         "feature_policy": feature_policy,
@@ -441,8 +542,15 @@ def write_model(
         "selection_margin": selection_margin,
         "features": list(FEATURES),
         "weights": model.weights,
+        "intercept": model.intercept,
         "threshold": model.threshold,
+        "probability_threshold": model.probability_threshold,
         "feature_scale": model.feature_scale,
+        "training_method": "batch_gradient_descent_cross_entropy",
+        "learning_rate": learning_rate,
+        "iterations": iterations,
+        "l2": l2,
+        "class_weight": class_weight,
         "training_examples": len(examples),
         "training_datasets": sorted({example.run_id for example in examples}),
         "training_utility": train_utility,
@@ -475,7 +583,9 @@ def write_folds(path: Path, folds: list[FoldResult]) -> None:
                 "train_utility",
                 "train_score",
                 "weights",
+                "intercept",
                 "threshold",
+                "probability_threshold",
             ]
         )
         for fold in folds:
@@ -498,7 +608,9 @@ def write_folds(path: Path, folds: list[FoldResult]) -> None:
                     f"{fold.train_utility:.12f}",
                     f"{fold.train_score:.12f}",
                     json.dumps(fold.model.weights, sort_keys=True),
+                    f"{fold.model.intercept:.12f}",
                     f"{fold.model.threshold:.12f}",
+                    f"{fold.model.probability_threshold:.12f}",
                 ]
             )
 
@@ -534,11 +646,12 @@ def write_report(
         "## Method",
         "",
         (
-            "A small threshold gate chooses between "
+            "A logistic-regression gate chooses between "
             f"`{model.action_off}` and `{model.action_on}` from normalized market-state "
-            f"features measured from `{feature_policy}` runs. Training uses "
+            f"features measured from `{feature_policy}` runs. Labels use "
             f"a `{selection_margin:.6f}` utility margin before labeling `{model.action_on}` "
-            f"better than `{model.action_off}`. "
+            f"better than `{model.action_off}`, and the model is fit with cross-entropy "
+            "loss plus L2 regularization. "
             "Validation leaves one quote dataset out, so each reported fold is "
             "evaluated on a dataset that was not used to choose the gate."
         ),
@@ -547,8 +660,9 @@ def write_report(
         "",
         f"- Training examples: `{len(examples)}`.",
         f"- Training utility: `{train_utility:.6f}`.",
-        f"- Training target score: `{train_score:.6f}`.",
-        f"- Threshold: `{model.threshold:.6f}`.",
+        f"- Training log-loss score: `{train_score:.6f}`.",
+        f"- Intercept: `{model.intercept:.6f}`.",
+        f"- Probability threshold: `{model.probability_threshold:.6f}`.",
         f"- Weights: `{json.dumps(model.weights, sort_keys=True)}`.",
         "",
         "## Holdout Result",
@@ -611,6 +725,11 @@ def main() -> None:
         args.action_off,
         scale,
         args.selection_margin,
+        args.learning_rate,
+        args.iterations,
+        args.l2,
+        args.probability_threshold,
+        args.class_weight,
     )
     folds = leave_one_dataset_out(
         normalized_examples,
@@ -618,6 +737,11 @@ def main() -> None:
         args.action_off,
         scale,
         args.selection_margin,
+        args.learning_rate,
+        args.iterations,
+        args.l2,
+        args.probability_threshold,
+        args.class_weight,
     )
     write_model(
         project_path(args.model_output),
@@ -628,6 +752,10 @@ def main() -> None:
         args.feature_policy,
         args.feature_window,
         args.selection_margin,
+        args.learning_rate,
+        args.iterations,
+        args.l2,
+        args.class_weight,
     )
     write_folds(project_path(args.folds_output), folds)
     write_report(
@@ -644,7 +772,7 @@ def main() -> None:
     print("Learned policy selector")
     print(f"examples: {len(examples)}")
     print(f"training utility: {train_utility:.6f}")
-    print(f"training target score: {train_score:.6f}")
+    print(f"training log-loss score: {train_score:.6f}")
     print(f"holdout utility: {safe_mean([fold.learned_utility for fold in folds]):.6f}")
     print(f"holdout selector action rate: {safe_mean([fold.action_on_count / (fold.action_on_count + fold.action_off_count) for fold in folds if fold.action_on_count + fold.action_off_count > 0]) * 100.0:.2f}%")
     print(f"wrote {project_path(args.model_output)}")

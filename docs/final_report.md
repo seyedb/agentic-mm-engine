@@ -2,21 +2,21 @@
 
 ## Scope
 
-This is an experimental market-making research project, not a production trading system. The goal is to show a clean, reproducible loop from public quote data to Rust paper execution and a small learned policy controller.
+This is an experimental market-making research project, not a production trading system. The goal is to show a clean, reproducible loop from public quote data to Rust paper execution and a small logistic-regression policy controller.
 
 ## System
 
 - Rust runs replay, paper sessions, live public-data paper mode, fills, fees, inventory, and PnL accounting.
 - Python runs data collection, policy evaluation, learned-gate training, Plotly reporting, and summary reports.
 - Policies include static, adaptive, hybrid, selector, and learned-selector variants.
-- The learned selector is trained in Python, exported as JSON, and loaded back into Rust for paper execution.
+- The learned selector is a logistic-regression classifier trained in Python, exported as JSON, and loaded back into Rust for paper execution.
 
 ## Research Result
 
 - Datasets: `7`.
 - Windows: `48`.
 - Fill assumptions: `configured`, `conservative_fill`, and `liquid_fill`.
-- Best configured policy: `learned_selector` with utility `0.000611`.
+- Best configured policy: `learned_selector` with utility `0.000572`.
 - Best conservative-fill policy: `selector` with utility `-0.000636`.
 - Best liquid-fill policy: `adaptive` with utility `0.004290`.
 
@@ -26,24 +26,24 @@ This is an experimental market-making research project, not a production trading
 - Adaptive baseline utility: `0.000177`.
 - Selector minus adaptive: `0.000344`.
 - Selector adaptive-step rate: `78.055556%`.
-- Rust learned-selector utility: `0.000611`.
-- Rust learned minus adaptive: `0.000434`.
-- Rust learned minus selector: `0.000090`.
-- Rust learned-selector adaptive-step rate: `82.291667%`.
+- Rust learned-selector utility: `0.000572`.
+- Rust learned minus adaptive: `0.000395`.
+- Rust learned minus selector: `0.000051`.
+- Rust learned-selector adaptive-step rate: `80.902778%`.
 
 ## Fill-Assumption Check
 
 - Conservative-fill winner: `selector`.
-- Learned-selector conservative-fill utility: `-0.000766`.
+- Learned-selector conservative-fill utility: `-0.000865`.
 - Liquid-fill winner: `adaptive`.
-- Learned-selector liquid-fill utility: `0.004172`.
+- Learned-selector liquid-fill utility: `0.004082`.
 - No policy wins all assumptions, so the result should be read as a research signal rather than a robust trading claim.
 
 ## Learned Gate
 
-- Learned gate holdout utility: `0.000451`.
-- Learned minus adaptive: `0.000274`.
-- Learned minus selector: `-0.000070`.
+- Learned gate holdout utility: `0.000296`.
+- Learned minus adaptive: `0.000118`.
+- Learned minus selector: `-0.000226`.
 - Best rule-selector sweep variant: `selector_thr_0p08_vol_6_spr_5_inv_0p4_dd_10`.
 - Best sweep score: `0.003067`.
 
@@ -62,7 +62,7 @@ This is an experimental market-making research project, not a production trading
 
 ## Interpretation
 
-The project has reached a credible proof-of-concept state. The agentic loop is real: public data feeds Rust paper sessions, Python trains a small policy gate, the model is exported to JSON, and Rust executes that learned selector in replay and live public-data paper mode.
+The project has reached a credible proof-of-concept state. The agentic loop is real: public data feeds Rust paper sessions, Python trains a small logistic-regression policy gate, the model is exported to JSON, and Rust executes that learned selector in replay and live public-data paper mode.
 
 The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, remains close under other assumptions, and produces a coherent live-paper run with bounded inventory. The weakest point remains fill realism.
 

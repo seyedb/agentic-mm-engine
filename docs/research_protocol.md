@@ -4,7 +4,7 @@ This project is an experimental market-making research engine, not a production 
 
 ## Research Question
 
-Can a Python-trained policy gate choose between `adaptive` and `selector` quoting in a way that improves risk-adjusted paper-session utility when Rust executes the learned policy?
+Can a Python-trained logistic-regression policy gate choose between `adaptive` and `selector` quoting in a way that improves risk-adjusted paper-session utility when Rust executes the learned policy?
 
 The learned policy is considered interesting only if it improves over simple baselines after being exported to JSON and loaded back into the Rust paper engine.
 
@@ -14,7 +14,7 @@ The learned policy is considered interesting only if it improves over simple bas
 - `adaptive`: widens and skews quotes from observed spread, volatility, and inventory.
 - `hybrid`: switches from static to adaptive on risk triggers.
 - `selector`: weighted rule-based selector between static and adaptive behavior.
-- `learned_selector`: Rust-executed learned gate trained by Python.
+- `learned_selector`: Rust-executed logistic-regression gate trained by Python.
 
 ## Evaluation Loop
 

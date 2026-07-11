@@ -478,7 +478,11 @@ struct LearnedPolicyModel {
     action_on: String,
     action_off: String,
     weights: LearnedFeatureWeights,
+    #[serde(default)]
+    intercept: f64,
     threshold: f64,
+    #[serde(default)]
+    probability_threshold: Option<f64>,
     feature_scale: LearnedFeatureScale,
     #[serde(default)]
     feature_window: Option<usize>,
@@ -624,10 +628,11 @@ fn learned_selector_policy_decision(
 }
 
 fn learned_policy_score(model: &LearnedPolicyModel, features: LearnedFeatureSnapshot) -> f64 {
-    normalized_feature(
-        features.estimated_volatility,
-        model.feature_scale.estimated_volatility,
-    ) * model.weights.estimated_volatility
+    model.intercept
+        + normalized_feature(
+            features.estimated_volatility,
+            model.feature_scale.estimated_volatility,
+        ) * model.weights.estimated_volatility
         + normalized_feature(
             features.observed_spread,
             model.feature_scale.observed_spread,
@@ -671,6 +676,14 @@ fn validate_learned_policy_model(path: &str, model: &LearnedPolicyModel) {
     }
     if !model.threshold.is_finite() {
         panic!("learned selector model {path} has non-finite threshold");
+    }
+    if !model.intercept.is_finite() {
+        panic!("learned selector model {path} has non-finite intercept");
+    }
+    if let Some(probability_threshold) = model.probability_threshold
+        && (!probability_threshold.is_finite() || !(0.0..=1.0).contains(&probability_threshold))
+    {
+        panic!("learned selector model {path} has invalid probability threshold");
     }
 }
 
@@ -1499,7 +1512,9 @@ mod tests {
         let model = LearnedPolicyModel {
             action_on: "selector".to_string(),
             action_off: "adaptive".to_string(),
-            threshold: 0.5,
+            intercept: 0.0,
+            threshold: 0.0,
+            probability_threshold: Some(0.5),
             feature_window: Some(30),
             weights: LearnedFeatureWeights {
                 estimated_volatility: 0.0,
