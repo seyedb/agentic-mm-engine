@@ -293,7 +293,7 @@ Run the full policy evaluation gate:
 python3 research/policy_evaluation_gate.py
 ```
 
-This evaluates static, adaptive, and hybrid policies across collected quote datasets, reruns a small fill-assumption sensitivity check, and writes:
+This evaluates static, adaptive, and hybrid policies across collected quote datasets, reruns a small fill-assumption sensitivity check, includes policy-trigger attribution, and writes:
 
 ```text
 target/research/policy_gate_dataset_summary.csv

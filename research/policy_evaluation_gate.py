@@ -79,6 +79,14 @@ class WindowRow:
     min_inventory: float
     max_inventory: float
     mean_abs_inventory: float
+    policy_static_steps: int
+    policy_adaptive_steps: int
+    trigger_none_steps: int
+    trigger_configured_steps: int
+    trigger_inventory_steps: int
+    trigger_drawdown_steps: int
+    trigger_volatility_steps: int
+    trigger_multiple_steps: int
     avg_spread: float
     avg_quote_distance: float
     utility: float
@@ -96,8 +104,27 @@ class PolicySummary:
     mean_fees: float
     mean_fills: float
     mean_abs_inventory: float
+    adaptive_step_pct: float
+    trigger_configured_steps: int
+    trigger_inventory_steps: int
+    trigger_drawdown_steps: int
+    trigger_volatility_steps: int
+    trigger_multiple_steps: int
     dataset_utility_wins: int
     window_utility_wins: int
+
+
+@dataclass(frozen=True)
+class RunDiagnostics:
+    mean_abs_inventory: float
+    policy_static_steps: int
+    policy_adaptive_steps: int
+    trigger_none_steps: int
+    trigger_configured_steps: int
+    trigger_inventory_steps: int
+    trigger_drawdown_steps: int
+    trigger_volatility_steps: int
+    trigger_multiple_steps: int
 
 
 def parse_args() -> argparse.Namespace:
@@ -341,7 +368,7 @@ def read_window_rows(path: Path, assumption: FillAssumption, dataset: Dataset, a
         for row in reader:
             min_inventory = parse_float(row, "min_inventory")
             max_inventory = parse_float(row, "max_inventory")
-            mean_abs_inventory = read_mean_abs_inventory(Path(row["output"]))
+            diagnostics = read_run_diagnostics(Path(row["output"]))
             final_pnl = parse_float(row, "final_pnl")
             total_fees = parse_float(row, "total_fees")
             max_drawdown = parse_float(row, "max_drawdown")
@@ -359,21 +386,71 @@ def read_window_rows(path: Path, assumption: FillAssumption, dataset: Dataset, a
                     max_drawdown=max_drawdown,
                     min_inventory=min_inventory,
                     max_inventory=max_inventory,
-                    mean_abs_inventory=mean_abs_inventory,
+                    mean_abs_inventory=diagnostics.mean_abs_inventory,
+                    policy_static_steps=diagnostics.policy_static_steps,
+                    policy_adaptive_steps=diagnostics.policy_adaptive_steps,
+                    trigger_none_steps=diagnostics.trigger_none_steps,
+                    trigger_configured_steps=diagnostics.trigger_configured_steps,
+                    trigger_inventory_steps=diagnostics.trigger_inventory_steps,
+                    trigger_drawdown_steps=diagnostics.trigger_drawdown_steps,
+                    trigger_volatility_steps=diagnostics.trigger_volatility_steps,
+                    trigger_multiple_steps=diagnostics.trigger_multiple_steps,
                     avg_spread=parse_float(row, "avg_spread"),
                     avg_quote_distance=parse_float(row, "avg_quote_distance"),
-                    utility=utility(final_pnl, max_drawdown, total_fees, mean_abs_inventory, args),
+                    utility=utility(
+                        final_pnl,
+                        max_drawdown,
+                        total_fees,
+                        diagnostics.mean_abs_inventory,
+                        args,
+                    ),
                 )
             )
     return rows
 
 
-def read_mean_abs_inventory(path: Path) -> float:
+def read_run_diagnostics(path: Path) -> RunDiagnostics:
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
             raise ValueError(f"{path}: CSV file is empty")
-        return mean([abs(parse_float(row, "inventory")) for row in reader])
+        missing = {"inventory", "policy_mode", "policy_trigger"}.difference(reader.fieldnames)
+        if missing:
+            raise ValueError(f"{path}: CSV missing columns: {', '.join(sorted(missing))}")
+
+        inventories = []
+        policy_static_steps = 0
+        policy_adaptive_steps = 0
+        trigger_counts = {
+            "none": 0,
+            "configured": 0,
+            "inventory": 0,
+            "drawdown": 0,
+            "volatility": 0,
+            "multiple": 0,
+        }
+        for row in reader:
+            inventories.append(abs(parse_float(row, "inventory")))
+            if row["policy_mode"] == "adaptive":
+                policy_adaptive_steps += 1
+            else:
+                policy_static_steps += 1
+            trigger = row["policy_trigger"]
+            if trigger not in trigger_counts:
+                raise ValueError(f"{path}: unknown policy_trigger {trigger!r}")
+            trigger_counts[trigger] += 1
+
+    return RunDiagnostics(
+        mean_abs_inventory=mean(inventories),
+        policy_static_steps=policy_static_steps,
+        policy_adaptive_steps=policy_adaptive_steps,
+        trigger_none_steps=trigger_counts["none"],
+        trigger_configured_steps=trigger_counts["configured"],
+        trigger_inventory_steps=trigger_counts["inventory"],
+        trigger_drawdown_steps=trigger_counts["drawdown"],
+        trigger_volatility_steps=trigger_counts["volatility"],
+        trigger_multiple_steps=trigger_counts["multiple"],
+    )
 
 
 def read_aggregate_rows(
@@ -463,6 +540,9 @@ def summarize_policies(aggregate_rows: list[AggregateRow], window_rows: list[Win
             for row in window_rows
             if row.assumption == assumption and row.policy == policy
         ]
+        total_policy_steps = sum(
+            row.policy_static_steps + row.policy_adaptive_steps for row in policy_windows
+        )
         summaries.append(
             PolicySummary(
                 assumption=assumption,
@@ -477,6 +557,19 @@ def summarize_policies(aggregate_rows: list[AggregateRow], window_rows: list[Win
                 mean_abs_inventory=mean(
                     [row.mean_abs_inventory for row in policy_windows]
                 ),
+                adaptive_step_pct=percent(
+                    sum(row.policy_adaptive_steps for row in policy_windows),
+                    total_policy_steps,
+                ),
+                trigger_configured_steps=sum(
+                    row.trigger_configured_steps for row in policy_windows
+                ),
+                trigger_inventory_steps=sum(row.trigger_inventory_steps for row in policy_windows),
+                trigger_drawdown_steps=sum(row.trigger_drawdown_steps for row in policy_windows),
+                trigger_volatility_steps=sum(
+                    row.trigger_volatility_steps for row in policy_windows
+                ),
+                trigger_multiple_steps=sum(row.trigger_multiple_steps for row in policy_windows),
                 dataset_utility_wins=dataset_wins.get((assumption, policy), 0),
                 window_utility_wins=window_wins.get((assumption, policy), 0),
             )
@@ -508,6 +601,10 @@ def window_win_counts(rows: list[WindowRow]) -> dict[tuple[str, str], int]:
 
 def mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
+
+
+def percent(part: float, total: float) -> float:
+    return 100.0 * part / total if total else 0.0
 
 
 def write_dataset_rows(path: Path, rows: list[AggregateRow]) -> None:
@@ -582,6 +679,14 @@ def write_window_rows(path: Path, rows: list[WindowRow]) -> None:
                 "min_inventory",
                 "max_inventory",
                 "mean_abs_inventory",
+                "policy_static_steps",
+                "policy_adaptive_steps",
+                "trigger_none_steps",
+                "trigger_configured_steps",
+                "trigger_inventory_steps",
+                "trigger_drawdown_steps",
+                "trigger_volatility_steps",
+                "trigger_multiple_steps",
                 "avg_spread",
                 "avg_quote_distance",
                 "utility",
@@ -606,6 +711,14 @@ def window_row_to_csv(row: WindowRow) -> list[str]:
         format_float(row.min_inventory),
         format_float(row.max_inventory),
         format_float(row.mean_abs_inventory),
+        str(row.policy_static_steps),
+        str(row.policy_adaptive_steps),
+        str(row.trigger_none_steps),
+        str(row.trigger_configured_steps),
+        str(row.trigger_inventory_steps),
+        str(row.trigger_drawdown_steps),
+        str(row.trigger_volatility_steps),
+        str(row.trigger_multiple_steps),
         format_float(row.avg_spread),
         format_float(row.avg_quote_distance),
         format_float(row.utility),
@@ -629,6 +742,12 @@ def write_policy_summaries(path: Path, rows: list[PolicySummary]) -> None:
                 "mean_fees",
                 "mean_fills",
                 "mean_abs_inventory",
+                "adaptive_step_pct",
+                "trigger_configured_steps",
+                "trigger_inventory_steps",
+                "trigger_drawdown_steps",
+                "trigger_volatility_steps",
+                "trigger_multiple_steps",
                 "dataset_utility_wins",
                 "window_utility_wins",
             ]
@@ -649,6 +768,12 @@ def policy_summary_to_csv(row: PolicySummary) -> list[str]:
         format_float(row.mean_fees),
         format_float(row.mean_fills),
         format_float(row.mean_abs_inventory),
+        format_float(row.adaptive_step_pct),
+        str(row.trigger_configured_steps),
+        str(row.trigger_inventory_steps),
+        str(row.trigger_drawdown_steps),
+        str(row.trigger_volatility_steps),
+        str(row.trigger_multiple_steps),
         str(row.dataset_utility_wins),
         str(row.window_utility_wins),
     ]
@@ -662,6 +787,7 @@ def render_report(
 ) -> str:
     configured = [row for row in summaries if row.assumption == "configured"]
     configured_winner = max(configured, key=lambda row: row.mean_utility) if configured else None
+    configured_hybrid = first_summary(configured, "hybrid")
     stable_winner = stability_winner(summaries, assumptions)
     lines = [
         "# Policy Evaluation Gate",
@@ -690,14 +816,20 @@ def render_report(
         lines.append(f"- Most stable utility winner across assumptions: `{stable_winner}`.")
     else:
         lines.append("- No single policy won every fill assumption.")
+    if configured_hybrid:
+        lines.append(
+            f"- Configured hybrid adaptive-step rate: "
+            f"{format_float(configured_hybrid.adaptive_step_pct)}%; "
+            f"triggers: {trigger_summary(configured_hybrid)}."
+        )
     lines.extend(
         [
             "- Interpretation: keep these as baselines; do not claim alpha yet.",
             "",
             "## Policy Summary",
             "",
-            "| assumption | policy | utility | pnl | drawdown | fees | fills | abs_inventory | dataset_wins | window_wins |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| assumption | policy | utility | pnl | drawdown | fills | adaptive_step_pct | triggers | dataset_wins | window_wins |",
+            "|---|---|---:|---:|---:|---:|---:|---|---:|---:|",
         ]
     )
     for row in sorted(summaries, key=lambda item: (item.assumption, -item.mean_utility)):
@@ -705,8 +837,8 @@ def render_report(
             "| "
             f"{row.assumption} | {row.policy} | {format_float(row.mean_utility)} | "
             f"{format_float(row.mean_pnl)} | {format_float(row.mean_drawdown)} | "
-            f"{format_float(row.mean_fees)} | {format_float(row.mean_fills)} | "
-            f"{format_float(row.mean_abs_inventory)} | {row.dataset_utility_wins} | "
+            f"{format_float(row.mean_fills)} | {format_float(row.adaptive_step_pct)} | "
+            f"{trigger_summary(row)} | {row.dataset_utility_wins} | "
             f"{row.window_utility_wins} |"
         )
     lines.extend(
@@ -735,12 +867,42 @@ def stability_winner(summaries: list[PolicySummary], assumptions: list[FillAssum
     return None
 
 
+def first_summary(rows: list[PolicySummary], policy: str) -> PolicySummary | None:
+    for row in rows:
+        if row.policy == policy:
+            return row
+    return None
+
+
+def trigger_summary(row: PolicySummary) -> str:
+    parts = [
+        ("configured", row.trigger_configured_steps),
+        ("inventory", row.trigger_inventory_steps),
+        ("drawdown", row.trigger_drawdown_steps),
+        ("volatility", row.trigger_volatility_steps),
+        ("multiple", row.trigger_multiple_steps),
+    ]
+    active = [f"{name}:{count}" for name, count in parts if count]
+    return ", ".join(active) if active else "none"
+
+
 def format_float(value: float) -> str:
     return f"{value:.6f}"
 
 
 def print_table(summaries: list[PolicySummary]) -> None:
-    headers = ["assumption", "policy", "utility", "pnl", "drawdown", "fills", "ds_wins", "win_wins"]
+    headers = [
+        "assumption",
+        "policy",
+        "utility",
+        "pnl",
+        "drawdown",
+        "fills",
+        "adapt_pct",
+        "triggers",
+        "ds_wins",
+        "win_wins",
+    ]
     rows = [
         [
             row.assumption,
@@ -749,6 +911,8 @@ def print_table(summaries: list[PolicySummary]) -> None:
             f"{row.mean_pnl:.5f}",
             f"{row.mean_drawdown:.5f}",
             f"{row.mean_fills:.2f}",
+            f"{row.adaptive_step_pct:.1f}",
+            trigger_summary(row),
             str(row.dataset_utility_wins),
             str(row.window_utility_wins),
         ]

@@ -44,6 +44,8 @@ class PaperRow:
     estimated_volatility: float
     regime: str
     agent_mode: str
+    policy_mode: str
+    policy_trigger: str
     bid: float
     ask: float
     spread: float
@@ -112,6 +114,8 @@ def parse_row(row: dict[str, str]) -> PaperRow:
         ),
         regime=row["regime"],
         agent_mode=row["agent_mode"],
+        policy_mode=row.get("policy_mode", "static"),
+        policy_trigger=row.get("policy_trigger", "none"),
         bid=parse_float(row["bid"], "bid"),
         ask=parse_float(row["ask"], "ask"),
         spread=parse_float(row["spread"], "spread"),
@@ -230,6 +234,10 @@ def print_summary(path: Path, rows: list[PaperRow]) -> None:
     print(f"avg_quote_distance: {format_number(avg_quote_dist, 4)}")
     print()
     print(render_table("By agent mode", ["mode", "steps", "pct"], count_rows(rows, "agent_mode")))
+    print()
+    print(render_table("By policy mode", ["mode", "steps", "pct"], count_rows(rows, "policy_mode")))
+    print()
+    print(render_table("By policy trigger", ["trigger", "steps", "pct"], count_rows(rows, "policy_trigger")))
     print()
     print(render_table("By regime", ["regime", "steps", "pct"], count_rows(rows, "regime")))
 

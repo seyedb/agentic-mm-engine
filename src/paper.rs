@@ -95,6 +95,8 @@ pub struct PaperSessionRow {
     pub estimated_volatility: f64,
     pub regime: MarketRegime,
     pub agent_mode: ControllerMode,
+    pub policy_mode: PaperPolicyMode,
+    pub policy_trigger: PaperPolicyTrigger,
     pub bid: f64,
     pub ask: f64,
     pub inventory: f64,
@@ -107,6 +109,22 @@ pub struct PaperSessionRow {
     pub fill_quantity: f64,
     pub fill_notional: f64,
     pub fees: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaperPolicyMode {
+    Static,
+    Adaptive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaperPolicyTrigger {
+    None,
+    Configured,
+    Inventory,
+    Drawdown,
+    Volatility,
+    Multiple,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,7 +198,7 @@ impl PaperSessionRunner {
         let decision = agent.decide(state, &context);
         let observed_quote = event_quote(event);
         let current_drawdown = (self.peak_pnl - state.pnl).max(0.0);
-        let policy_quote = apply_paper_policy(
+        let policy_decision = apply_paper_policy(
             decision.quote,
             state,
             observed_quote,
@@ -189,7 +207,7 @@ impl PaperSessionRunner {
             self.config.policy,
         );
         let quote = fee_aware_quote(
-            policy_quote,
+            policy_decision.quote,
             state.mid_price,
             self.config.fee_rate,
             self.config.fee_spread_multiplier,
@@ -222,6 +240,8 @@ impl PaperSessionRunner {
             estimated_volatility,
             regime,
             agent_mode: decision.mode,
+            policy_mode: policy_decision.mode,
+            policy_trigger: policy_decision.trigger,
             quote,
             state,
             drawdown,
@@ -237,28 +257,36 @@ fn apply_paper_policy(
     estimated_volatility: f64,
     current_drawdown: f64,
     policy: PaperPolicyConfig,
-) -> Quote {
+) -> PaperPolicyDecision {
     match policy {
-        PaperPolicyConfig::Static => quote,
+        PaperPolicyConfig::Static => PaperPolicyDecision {
+            quote,
+            mode: PaperPolicyMode::Static,
+            trigger: PaperPolicyTrigger::None,
+        },
         PaperPolicyConfig::Adaptive {
             min_spread,
             max_spread,
             volatility_spread_multiplier,
             inventory_skew_multiplier,
             touch_spread_multiplier,
-        } => adaptive_quote(
-            quote,
-            state,
-            observed_quote,
-            estimated_volatility,
-            AdaptivePolicyParams {
-                min_spread,
-                max_spread,
-                volatility_spread_multiplier,
-                inventory_skew_multiplier,
-                touch_spread_multiplier,
-            },
-        ),
+        } => PaperPolicyDecision {
+            quote: adaptive_quote(
+                quote,
+                state,
+                observed_quote,
+                estimated_volatility,
+                AdaptivePolicyParams {
+                    min_spread,
+                    max_spread,
+                    volatility_spread_multiplier,
+                    inventory_skew_multiplier,
+                    touch_spread_multiplier,
+                },
+            ),
+            mode: PaperPolicyMode::Adaptive,
+            trigger: PaperPolicyTrigger::Configured,
+        },
         PaperPolicyConfig::Hybrid {
             min_spread,
             max_spread,
@@ -269,32 +297,48 @@ fn apply_paper_policy(
             inventory_threshold,
             volatility_threshold,
         } => {
-            if should_use_adaptive_policy(
+            let trigger = adaptive_policy_trigger(
                 state,
                 estimated_volatility,
                 current_drawdown,
                 drawdown_threshold,
                 inventory_threshold,
                 volatility_threshold,
-            ) {
-                adaptive_quote(
+            );
+            if trigger == PaperPolicyTrigger::None {
+                PaperPolicyDecision {
                     quote,
-                    state,
-                    observed_quote,
-                    estimated_volatility,
-                    AdaptivePolicyParams {
-                        min_spread,
-                        max_spread,
-                        volatility_spread_multiplier,
-                        inventory_skew_multiplier,
-                        touch_spread_multiplier,
-                    },
-                )
+                    mode: PaperPolicyMode::Static,
+                    trigger,
+                }
             } else {
-                quote
+                PaperPolicyDecision {
+                    quote: adaptive_quote(
+                        quote,
+                        state,
+                        observed_quote,
+                        estimated_volatility,
+                        AdaptivePolicyParams {
+                            min_spread,
+                            max_spread,
+                            volatility_spread_multiplier,
+                            inventory_skew_multiplier,
+                            touch_spread_multiplier,
+                        },
+                    ),
+                    mode: PaperPolicyMode::Adaptive,
+                    trigger,
+                }
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PaperPolicyDecision {
+    quote: Quote,
+    mode: PaperPolicyMode,
+    trigger: PaperPolicyTrigger,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -306,17 +350,24 @@ struct AdaptivePolicyParams {
     touch_spread_multiplier: f64,
 }
 
-fn should_use_adaptive_policy(
+fn adaptive_policy_trigger(
     state: &SystemState,
     estimated_volatility: f64,
     current_drawdown: f64,
     drawdown_threshold: f64,
     inventory_threshold: f64,
     volatility_threshold: f64,
-) -> bool {
-    current_drawdown >= drawdown_threshold
-        || state.inventory.abs() >= inventory_threshold
-        || estimated_volatility >= volatility_threshold
+) -> PaperPolicyTrigger {
+    let inventory = state.inventory.abs() >= inventory_threshold;
+    let drawdown = current_drawdown >= drawdown_threshold;
+    let volatility = estimated_volatility >= volatility_threshold;
+    match (inventory, drawdown, volatility) {
+        (false, false, false) => PaperPolicyTrigger::None,
+        (true, false, false) => PaperPolicyTrigger::Inventory,
+        (false, true, false) => PaperPolicyTrigger::Drawdown,
+        (false, false, true) => PaperPolicyTrigger::Volatility,
+        _ => PaperPolicyTrigger::Multiple,
+    }
 }
 
 fn adaptive_quote(
@@ -352,7 +403,7 @@ pub fn paper_session_to_csv(result: &PaperSessionResult) -> String {
 }
 
 pub fn paper_session_csv_header() -> &'static str {
-    "timestamp_ms,mid_price,observed_bid,observed_ask,estimated_volatility,regime,agent_mode,bid,ask,spread,inventory,cash,pnl,drawdown,fills,buy_fills,sell_fills,fill_quantity,fill_notional,fees"
+    "timestamp_ms,mid_price,observed_bid,observed_ask,estimated_volatility,regime,agent_mode,policy_mode,policy_trigger,bid,ask,spread,inventory,cash,pnl,drawdown,fills,buy_fills,sell_fills,fill_quantity,fill_notional,fees"
 }
 
 pub fn paper_session_row_to_csv(row: &PaperSessionRow) -> String {
@@ -364,6 +415,8 @@ pub fn paper_session_row_to_csv(row: &PaperSessionRow) -> String {
         format_f64(row.estimated_volatility),
         regime_name(row.regime).to_string(),
         controller_mode_name(&row.agent_mode).to_string(),
+        policy_mode_name(row.policy_mode).to_string(),
+        policy_trigger_name(row.policy_trigger).to_string(),
         format_f64(row.bid),
         format_f64(row.ask),
         format_f64(row.ask - row.bid),
@@ -387,6 +440,8 @@ struct SessionRowInput<'a> {
     estimated_volatility: f64,
     regime: MarketRegime,
     agent_mode: ControllerMode,
+    policy_mode: PaperPolicyMode,
+    policy_trigger: PaperPolicyTrigger,
     quote: Quote,
     state: &'a SystemState,
     drawdown: f64,
@@ -419,6 +474,8 @@ fn session_row(input: SessionRowInput<'_>) -> PaperSessionRow {
         estimated_volatility: input.estimated_volatility,
         regime: input.regime,
         agent_mode: input.agent_mode,
+        policy_mode: input.policy_mode,
+        policy_trigger: input.policy_trigger,
         bid: input.quote.bid,
         ask: input.quote.ask,
         inventory: input.state.inventory,
@@ -625,6 +682,24 @@ fn controller_mode_name(mode: &ControllerMode) -> &'static str {
     }
 }
 
+fn policy_mode_name(mode: PaperPolicyMode) -> &'static str {
+    match mode {
+        PaperPolicyMode::Static => "static",
+        PaperPolicyMode::Adaptive => "adaptive",
+    }
+}
+
+fn policy_trigger_name(trigger: PaperPolicyTrigger) -> &'static str {
+    match trigger {
+        PaperPolicyTrigger::None => "none",
+        PaperPolicyTrigger::Configured => "configured",
+        PaperPolicyTrigger::Inventory => "inventory",
+        PaperPolicyTrigger::Drawdown => "drawdown",
+        PaperPolicyTrigger::Volatility => "volatility",
+        PaperPolicyTrigger::Multiple => "multiple",
+    }
+}
+
 fn format_f64(value: f64) -> String {
     format!("{value:.6}")
 }
@@ -675,6 +750,8 @@ mod tests {
 
         assert_eq!(result.rows.len(), 2);
         assert_eq!(result.rows[0].agent_mode, ControllerMode::FixedSpread);
+        assert_eq!(result.rows[0].policy_mode, PaperPolicyMode::Static);
+        assert_eq!(result.rows[0].policy_trigger, PaperPolicyTrigger::None);
         assert_eq!(result.rows[0].observed_bid, Some(99.95));
         assert_eq!(result.rows[0].observed_ask, Some(100.05));
     }
@@ -754,7 +831,7 @@ mod tests {
     #[test]
     fn adaptive_policy_widens_toward_observed_spread() {
         let state = SystemState::new(100.0);
-        let quote = apply_paper_policy(
+        let decision = apply_paper_policy(
             Quote {
                 bid: 99.99,
                 ask: 100.01,
@@ -775,14 +852,16 @@ mod tests {
             },
         );
 
-        assert!((quote.spread() - 0.10).abs() < 1e-12);
+        assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
+        assert_eq!(decision.trigger, PaperPolicyTrigger::Configured);
+        assert!((decision.quote.spread() - 0.10).abs() < 1e-12);
     }
 
     #[test]
     fn adaptive_policy_skews_away_from_long_inventory() {
         let mut state = SystemState::new(100.0);
         state.inventory = 2.0;
-        let quote = apply_paper_policy(
+        let decision = apply_paper_policy(
             Quote {
                 bid: 99.90,
                 ask: 100.10,
@@ -800,8 +879,8 @@ mod tests {
             },
         );
 
-        assert!((quote.bid - 99.70).abs() < 1e-12);
-        assert!((quote.ask - 99.90).abs() < 1e-12);
+        assert!((decision.quote.bid - 99.70).abs() < 1e-12);
+        assert!((decision.quote.ask - 99.90).abs() < 1e-12);
     }
 
     #[test]
@@ -811,7 +890,7 @@ mod tests {
             bid: 99.99,
             ask: 100.01,
         };
-        let quote = apply_paper_policy(
+        let decision = apply_paper_policy(
             input,
             &state,
             Some(Quote {
@@ -832,13 +911,15 @@ mod tests {
             },
         );
 
-        assert_eq!(quote, input);
+        assert_eq!(decision.quote, input);
+        assert_eq!(decision.mode, PaperPolicyMode::Static);
+        assert_eq!(decision.trigger, PaperPolicyTrigger::None);
     }
 
     #[test]
     fn hybrid_policy_uses_adaptive_quote_when_risk_trigger_fires() {
         let state = SystemState::new(100.0);
-        let quote = apply_paper_policy(
+        let decision = apply_paper_policy(
             Quote {
                 bid: 99.99,
                 ask: 100.01,
@@ -862,7 +943,9 @@ mod tests {
             },
         );
 
-        assert!((quote.spread() - 0.12).abs() < 1e-12);
+        assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
+        assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);
+        assert!((decision.quote.spread() - 0.12).abs() < 1e-12);
     }
 
     #[test]
