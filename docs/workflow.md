@@ -287,6 +287,21 @@ This reruns static-vs-adaptive evaluation across collected quote datasets under 
 target/research/fill_assumption_sensitivity.csv
 ```
 
+Run the full policy evaluation gate:
+
+```bash
+python3 research/policy_evaluation_gate.py
+```
+
+This evaluates static, adaptive, and hybrid policies across collected quote datasets, reruns a small fill-assumption sensitivity check, and writes:
+
+```text
+target/research/policy_gate_dataset_summary.csv
+target/research/policy_gate_window_results.csv
+target/research/policy_gate_policy_summary.csv
+target/research/policy_gate_report.md
+```
+
 Run the live session and produce the analysis plus Plotly report in one step:
 
 ```bash
