@@ -675,8 +675,8 @@ fn validate_learned_policy_model(path: &str, model: &LearnedPolicyModel) {
             other => panic!("learned selector model {path} has unsupported action {other:?}"),
         }
     }
-    if model.threshold < 0.0 {
-        panic!("learned selector model {path} has negative threshold");
+    if !model.threshold.is_finite() {
+        panic!("learned selector model {path} has non-finite threshold");
     }
 }
 

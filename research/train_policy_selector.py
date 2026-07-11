@@ -54,7 +54,12 @@ class FoldResult:
     selector_utility: float
     action_on_count: int
     action_off_count: int
+    opportunities: int
+    missed_opportunities: int
+    target_accuracy: float
+    captured_advantage: float
     train_utility: float
+    train_score: float
     model: GateModel
 
 
@@ -70,6 +75,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--assumption", default="configured")
     parser.add_argument("--action-on", default="selector")
     parser.add_argument("--action-off", default="adaptive")
+    parser.add_argument(
+        "--selection-margin",
+        type=float,
+        default=0.00025,
+        help="Require this much action-on utility advantage before labeling a selector opportunity.",
+    )
     parser.add_argument(
         "--feature-policy",
         default="static",
@@ -232,8 +243,8 @@ def candidate_models(
     action_off: str,
     scale: dict[str, float],
 ) -> list[GateModel]:
-    weight_grid = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
-    thresholds = (0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0)
+    weight_grid = (-8.0, -4.0, -2.0, -1.0, -0.5, -0.25, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
+    thresholds = (-2.0, -1.5, -1.0, -0.75, -0.5, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0)
     models = [
         GateModel(action_on, action_off, {feature: 0.0 for feature in FEATURES}, 0.0, scale),
         GateModel(action_on, action_off, {feature: 0.0 for feature in FEATURES}, 1.0, scale),
@@ -260,10 +271,38 @@ def choose_action(model: GateModel, features: dict[str, float]) -> str:
     return model.action_off
 
 
-def evaluate_model(model: GateModel, examples: list[Example]) -> tuple[float, int, int]:
+def target_action(
+    example: Example,
+    action_on: str,
+    action_off: str,
+    margin: float,
+) -> str:
+    if example.utilities[action_on] > example.utilities[action_off] + margin:
+        return action_on
+    return action_off
+
+
+def selector_opportunity(
+    example: Example,
+    action_on: str,
+    action_off: str,
+    margin: float,
+) -> bool:
+    return example.utilities[action_on] > example.utilities[action_off] + margin
+
+
+def evaluate_model(
+    model: GateModel,
+    examples: list[Example],
+    margin: float,
+) -> tuple[float, int, int, int, int, float, float]:
     utilities = []
     action_on_count = 0
     action_off_count = 0
+    correct = 0
+    opportunities = 0
+    missed_opportunities = 0
+    captured_advantage = 0.0
     for example in examples:
         action = choose_action(model, example.features)
         utilities.append(example.utilities[action])
@@ -271,7 +310,39 @@ def evaluate_model(model: GateModel, examples: list[Example]) -> tuple[float, in
             action_on_count += 1
         else:
             action_off_count += 1
-    return safe_mean(utilities), action_on_count, action_off_count
+        target = target_action(example, model.action_on, model.action_off, margin)
+        if action == target:
+            correct += 1
+        if selector_opportunity(example, model.action_on, model.action_off, margin):
+            opportunities += 1
+            if action == model.action_on:
+                captured_advantage += example.utilities[model.action_on] - example.utilities[model.action_off]
+            else:
+                missed_opportunities += 1
+    target_accuracy = correct / len(examples) if examples else 0.0
+    return (
+        safe_mean(utilities),
+        action_on_count,
+        action_off_count,
+        opportunities,
+        missed_opportunities,
+        target_accuracy,
+        captured_advantage,
+    )
+
+
+def training_score(model: GateModel, examples: list[Example], margin: float) -> float:
+    score = 0.0
+    for example in examples:
+        action = choose_action(model, example.features)
+        target = target_action(example, model.action_on, model.action_off, margin)
+        advantage = abs(example.utilities[model.action_on] - example.utilities[model.action_off])
+        weight = max(advantage, margin)
+        if action == target:
+            score += weight
+        else:
+            score -= weight
+    return score / len(examples) if examples else 0.0
 
 
 def train_model(
@@ -279,17 +350,29 @@ def train_model(
     action_on: str,
     action_off: str,
     scale: dict[str, float],
-) -> tuple[GateModel, float]:
+    margin: float,
+) -> tuple[GateModel, float, float]:
     best_model = None
-    best_utility = None
+    best_score = None
+    best_utility = 0.0
     for model in candidate_models(action_on, action_off, scale):
-        utility, _action_on_count, _action_off_count = evaluate_model(model, examples)
-        if best_utility is None or utility > best_utility:
+        score = training_score(model, examples, margin)
+        (
+            utility,
+            _action_on_count,
+            _action_off_count,
+            _opportunities,
+            _missed_opportunities,
+            _target_accuracy,
+            _captured_advantage,
+        ) = evaluate_model(model, examples, margin)
+        if best_score is None or score > best_score or (score == best_score and utility > best_utility):
             best_model = model
+            best_score = score
             best_utility = utility
     assert best_model is not None
-    assert best_utility is not None
-    return best_model, best_utility
+    assert best_score is not None
+    return best_model, best_utility, best_score
 
 
 def leave_one_dataset_out(
@@ -297,14 +380,23 @@ def leave_one_dataset_out(
     action_on: str,
     action_off: str,
     scale: dict[str, float],
+    margin: float,
 ) -> list[FoldResult]:
     folds = []
     run_ids = sorted({example.run_id for example in examples})
     for holdout in run_ids:
         train = [example for example in examples if example.run_id != holdout]
         test = [example for example in examples if example.run_id == holdout]
-        model, train_utility = train_model(train, action_on, action_off, scale)
-        learned_utility, action_on_count, action_off_count = evaluate_model(model, test)
+        model, train_utility, train_score = train_model(train, action_on, action_off, scale, margin)
+        (
+            learned_utility,
+            action_on_count,
+            action_off_count,
+            opportunities,
+            missed_opportunities,
+            target_accuracy,
+            captured_advantage,
+        ) = evaluate_model(model, test, margin)
         folds.append(
             FoldResult(
                 holdout_run_id=holdout,
@@ -314,7 +406,12 @@ def leave_one_dataset_out(
                 selector_utility=baseline_utility(test, "selector"),
                 action_on_count=action_on_count,
                 action_off_count=action_off_count,
+                opportunities=opportunities,
+                missed_opportunities=missed_opportunities,
+                target_accuracy=target_accuracy,
+                captured_advantage=captured_advantage,
                 train_utility=train_utility,
+                train_score=train_score,
                 model=model,
             )
         )
@@ -330,8 +427,10 @@ def write_model(
     model: GateModel,
     examples: list[Example],
     train_utility: float,
+    train_score: float,
     feature_policy: str,
     feature_window: int,
+    selection_margin: float,
 ) -> None:
     payload = {
         "model_type": "threshold_policy_gate",
@@ -339,6 +438,7 @@ def write_model(
         "action_off": model.action_off,
         "feature_policy": feature_policy,
         "feature_window": feature_window,
+        "selection_margin": selection_margin,
         "features": list(FEATURES),
         "weights": model.weights,
         "threshold": model.threshold,
@@ -346,6 +446,7 @@ def write_model(
         "training_examples": len(examples),
         "training_datasets": sorted({example.run_id for example in examples}),
         "training_utility": train_utility,
+        "training_score": train_score,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -367,7 +468,12 @@ def write_folds(path: Path, folds: list[FoldResult]) -> None:
                 "learned_minus_selector",
                 "action_on_count",
                 "action_off_count",
+                "opportunities",
+                "missed_opportunities",
+                "target_accuracy",
+                "captured_advantage",
                 "train_utility",
+                "train_score",
                 "weights",
                 "threshold",
             ]
@@ -385,7 +491,12 @@ def write_folds(path: Path, folds: list[FoldResult]) -> None:
                     f"{fold.learned_utility - fold.selector_utility:.12f}",
                     fold.action_on_count,
                     fold.action_off_count,
+                    fold.opportunities,
+                    fold.missed_opportunities,
+                    f"{fold.target_accuracy:.12f}",
+                    f"{fold.captured_advantage:.12f}",
                     f"{fold.train_utility:.12f}",
+                    f"{fold.train_score:.12f}",
                     json.dumps(fold.model.weights, sort_keys=True),
                     f"{fold.model.threshold:.12f}",
                 ]
@@ -396,9 +507,11 @@ def write_report(
     path: Path,
     model: GateModel,
     train_utility: float,
+    train_score: float,
     folds: list[FoldResult],
     examples: list[Example],
     feature_policy: str,
+    selection_margin: float,
 ) -> None:
     learned = safe_mean([fold.learned_utility for fold in folds])
     static = safe_mean([fold.static_utility for fold in folds])
@@ -406,6 +519,14 @@ def write_report(
     selector = safe_mean([fold.selector_utility for fold in folds])
     adaptive_wins = sum(fold.learned_utility > fold.adaptive_utility for fold in folds)
     selector_wins = sum(fold.learned_utility > fold.selector_utility for fold in folds)
+    action_on_count = sum(fold.action_on_count for fold in folds)
+    action_off_count = sum(fold.action_off_count for fold in folds)
+    total_actions = action_on_count + action_off_count
+    action_on_rate = action_on_count / total_actions * 100.0 if total_actions else 0.0
+    opportunities = sum(fold.opportunities for fold in folds)
+    missed_opportunities = sum(fold.missed_opportunities for fold in folds)
+    captured_advantage = sum(fold.captured_advantage for fold in folds)
+    target_accuracy = safe_mean([fold.target_accuracy for fold in folds])
 
     lines = [
         "# Learned Policy Selector",
@@ -416,7 +537,9 @@ def write_report(
             "A small threshold gate chooses between "
             f"`{model.action_off}` and `{model.action_on}` from normalized market-state "
             f"features measured from `{feature_policy}` runs. Training uses "
-            "leave-one-quote-dataset-out validation, so each reported fold is "
+            f"a `{selection_margin:.6f}` utility margin before labeling `{model.action_on}` "
+            f"better than `{model.action_off}`. "
+            "Validation leaves one quote dataset out, so each reported fold is "
             "evaluated on a dataset that was not used to choose the gate."
         ),
         "",
@@ -424,6 +547,7 @@ def write_report(
         "",
         f"- Training examples: `{len(examples)}`.",
         f"- Training utility: `{train_utility:.6f}`.",
+        f"- Training target score: `{train_score:.6f}`.",
         f"- Threshold: `{model.threshold:.6f}`.",
         f"- Weights: `{json.dumps(model.weights, sort_keys=True)}`.",
         "",
@@ -437,6 +561,11 @@ def write_report(
         f"- Learned minus selector: `{learned - selector:.6f}`.",
         f"- Holdout wins versus adaptive: `{adaptive_wins}/{len(folds)}`.",
         f"- Holdout wins versus selector: `{selector_wins}/{len(folds)}`.",
+        f"- `{model.action_on}` action rate: `{action_on_rate:.2f}%`.",
+        f"- Selector opportunities: `{opportunities}`.",
+        f"- Missed selector opportunities: `{missed_opportunities}`.",
+        f"- Captured selector advantage: `{captured_advantage:.6f}`.",
+        f"- Target accuracy: `{target_accuracy:.2%}`.",
         "",
         "## Interpretation",
         "",
@@ -449,8 +578,8 @@ def write_report(
         "",
         "## Folds",
         "",
-        "| holdout | learned | static | adaptive | selector | on | off |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| holdout | learned | static | adaptive | selector | on | off | opp | missed | target_acc | captured_adv |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for fold in folds:
         lines.append(
@@ -461,7 +590,11 @@ def write_report(
             f"{fold.adaptive_utility:.6f} | "
             f"{fold.selector_utility:.6f} | "
             f"{fold.action_on_count} | "
-            f"{fold.action_off_count} |"
+            f"{fold.action_off_count} | "
+            f"{fold.opportunities} | "
+            f"{fold.missed_opportunities} | "
+            f"{fold.target_accuracy:.2%} | "
+            f"{fold.captured_advantage:.6f} |"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
@@ -472,40 +605,48 @@ def main() -> None:
     examples = read_examples(args)
     scale = feature_scale(examples)
     normalized_examples = normalize_examples(examples, scale)
-    model, train_utility = train_model(
+    model, train_utility, train_score = train_model(
         normalized_examples,
         args.action_on,
         args.action_off,
         scale,
+        args.selection_margin,
     )
     folds = leave_one_dataset_out(
         normalized_examples,
         args.action_on,
         args.action_off,
         scale,
+        args.selection_margin,
     )
     write_model(
         project_path(args.model_output),
         model,
         examples,
         train_utility,
+        train_score,
         args.feature_policy,
         args.feature_window,
+        args.selection_margin,
     )
     write_folds(project_path(args.folds_output), folds)
     write_report(
         project_path(args.report_output),
         model,
         train_utility,
+        train_score,
         folds,
         examples,
         args.feature_policy,
+        args.selection_margin,
     )
 
     print("Learned policy selector")
     print(f"examples: {len(examples)}")
     print(f"training utility: {train_utility:.6f}")
+    print(f"training target score: {train_score:.6f}")
     print(f"holdout utility: {safe_mean([fold.learned_utility for fold in folds]):.6f}")
+    print(f"holdout selector action rate: {safe_mean([fold.action_on_count / (fold.action_on_count + fold.action_off_count) for fold in folds if fold.action_on_count + fold.action_off_count > 0]) * 100.0:.2f}%")
     print(f"wrote {project_path(args.model_output)}")
     print(f"wrote {project_path(args.folds_output)}")
     print(f"wrote {project_path(args.report_output)}")

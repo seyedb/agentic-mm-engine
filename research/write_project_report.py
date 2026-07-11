@@ -104,6 +104,12 @@ def render_report(
     adaptive = adaptive_row(policy_rows)
     learned_selector = learned_selector_row(policy_rows)
     best_sweep = best_sweep_row(sweep_rows)
+    interpretation = (
+        "The selector is promising because it can beat the adaptive baseline under the "
+        "configured evaluation while using adaptive quoting less than 100% of the time. "
+        "The learned gate is a real ML-agent proof of concept, but robustness still "
+        "depends on more quote datasets and fill-assumption checks."
+    )
 
     lines = [
         "# Agentic Market Making: Brief Research Report",
@@ -151,6 +157,13 @@ def render_report(
         rust_learned = parse_float(learned_selector, "mean_utility")
         rust_adaptive = parse_float(adaptive, "mean_utility")
         rust_selector = parse_float(selector, "mean_utility")
+        if rust_learned > rust_selector:
+            interpretation = (
+                "The Rust-executed learned selector now beats both adaptive and the "
+                "hand-tuned selector under the configured evaluation. This is a useful "
+                "agentic ML result, but it is still a small-sample research result, not "
+                "evidence of a live trading edge."
+            )
         lines.extend(
             [
                 f"- Rust learned-selector utility: `{rust_learned:.6f}`.",
@@ -165,7 +178,7 @@ def render_report(
             "",
             "## Interpretation",
             "",
-            "The selector is promising because it can beat the adaptive baseline under the configured evaluation while using adaptive quoting less than 100% of the time. The learned gate is a real ML-agent proof of concept, but it does not yet beat the hand-tuned selector out of sample.",
+            interpretation,
             "",
             "## Limitations",
             "",
