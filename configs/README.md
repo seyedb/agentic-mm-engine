@@ -39,5 +39,5 @@ Paper-policy configs used by the research loop:
 Live paper config:
 
 ```bash
-cargo run -- run configs/runs/kraken_solusd_selector_maker_fee_paper_live.json
+cargo run -- run configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live.json
 ```

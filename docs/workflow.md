@@ -88,15 +88,17 @@ The evaluation standard is described in [research_protocol.md](research_protocol
 Live paper mode polls public Kraken top-of-book data and never places orders:
 
 ```bash
-cargo run -- run configs/runs/kraken_solusd_selector_maker_fee_paper_live.json
+cargo run -- run configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live.json
 ```
 
 Run a live paper config and produce analysis plus a Plotly report in one step:
 
 ```bash
-python3 research/run_paper_live_report.py configs/runs/kraken_solusd_selector_maker_fee_paper_live.json \
+python3 research/run_paper_live_report.py configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live.json \
   --run-id solusd_001
 ```
+
+See [live_demo.md](live_demo.md) for the latest learned-selector live-paper demonstration.
 
 Compare preserved live runs and paper-fill calibrations:
 
