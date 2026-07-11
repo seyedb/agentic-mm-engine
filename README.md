@@ -1,21 +1,21 @@
 ## Agentic Market Making
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-A Rust-based experimental market-making engine for studying inventory-aware quoting and, eventually, agent-driven strategy control.
+A Rust-based experimental market-making research engine for studying inventory-aware quoting, public quote replay, and learned policy selection.
 
 ### Status
 
-This is a learning and research project, not a production trading system. The current focus is a clean simulation core with configurable parameter sweeps and reproducible experiment output.
+This is a learning and research project, not a production trading system. The current focus is a clean Rust paper engine with a reproducible Python research loop.
 
-The long-term goal is an agentic market maker: a system where a controller can observe market state, evaluate risk, and adapt strategy parameters over time.
+The project now includes an agentic proof of concept: Python trains a small policy-selection gate from paper-session results, exports a JSON model, and Rust executes that learned policy during replay.
 
 ### What It Does
 
-- Simulates fixed-spread, volatility-aware, inventory-risk, rule-based controller, regime-adaptive, and Avellaneda-Stoikov strategies.
-- Models fills, fees, adverse selection, inventory, cash, and mark-to-market PnL.
-- Runs configurable multi-seed parameter sweeps.
-- Aggregates sweep results across multiple random seeds.
-- Writes ranked sweep results and best-strategy step datasets to CSV.
+- Replays public top-of-book quote data through Rust paper-session policies.
+- Compares static, adaptive, hybrid, selector, and learned-selector policies.
+- Models fills, fees, inventory, cash, mark-to-market PnL, and drawdown.
+- Trains a small Python learned gate and exports it back to Rust.
+- Evaluates policy robustness across multiple fill assumptions.
 
 ### Run
 
@@ -51,8 +51,8 @@ Run the current paper-policy research loop after collecting quote datasets:
 
 ```bash
 python3 research/policy_evaluation_gate.py
-python3 research/sweep_selector_policy.py
 python3 research/train_policy_selector.py
+python3 research/policy_evaluation_gate.py
 python3 research/write_project_report.py
 ```
 
@@ -67,6 +67,7 @@ cargo clippy -- -D warnings
 
 - [Model assumptions](docs/model.md)
 - [Experiments and sweeps](docs/experiments.md)
+- [Research protocol](docs/research_protocol.md)
 - [Research workflow](docs/workflow.md)
 - [Config guide](configs/README.md)
 
@@ -76,6 +77,6 @@ This project is developed as a learning and research effort with AI assistance f
 
 ### Roadmap
 
-- Improve the fill model using validation warnings.
-- Add live public market data in paper-trading mode.
-- Add an agent/control layer after the core simulator is stable.
+- Consolidate the final research protocol and result bundle.
+- Run a live public-data paper demonstration with the learned selector.
+- Keep improving the learned policy only when new data exposes a concrete weakness.

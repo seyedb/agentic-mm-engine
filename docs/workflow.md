@@ -81,6 +81,8 @@ Write the concise project status report:
 python3 research/write_project_report.py
 ```
 
+The evaluation standard is described in [research_protocol.md](research_protocol.md).
+
 ## Live Paper Mode
 
 Live paper mode polls public Kraken top-of-book data and never places orders:
