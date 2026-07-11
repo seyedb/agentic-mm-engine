@@ -98,6 +98,14 @@ python3 research/run_paper_live_report.py configs/runs/kraken_solusd_learned_sel
   --run-id solusd_001
 ```
 
+Use the longer learned-selector config when checking whether the live-paper behavior is stable beyond a short smoke test:
+
+```bash
+python3 research/run_paper_live_report.py configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live_long.json \
+  --run-id solusd_long_001
+python3 research/compare_paper_live_runs.py
+```
+
 See [live_demo.md](live_demo.md) for the latest learned-selector live-paper demonstration.
 
 Optional live-run comparison/calibration helpers:

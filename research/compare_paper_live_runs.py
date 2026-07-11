@@ -28,8 +28,6 @@ REQUIRED_COLUMNS = {
     "fill_notional",
     "fees",
 }
-
-
 @dataclass(frozen=True)
 class RunSummary:
     run_id: str
@@ -53,7 +51,12 @@ class RunSummary:
     max_inventory: float
     avg_spread: float
     avg_volatility: float
+    avg_quote_distance: float
     observed_quote_steps: int
+    adaptive_steps: int
+    static_steps: int
+    main_trigger: str
+    main_trigger_steps: int
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,6 +98,20 @@ def parse_int(value: str, column: str) -> int:
 
 def mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
+
+
+def count_values(rows: list[dict[str, str]], column: str, default: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = row.get(column, default) or default
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def dominant_count(counts: dict[str, int], default: str) -> tuple[str, int]:
+    if not counts:
+        return default, 0
+    return max(counts.items(), key=lambda item: (item[1], item[0]))
 
 
 def metadata_path(csv_path: Path) -> Path:
@@ -169,6 +186,20 @@ def summarize_run(csv_path: Path) -> RunSummary:
     observed_quote_steps = sum(
         1 for row in rows if row["observed_bid"] != "" and row["observed_ask"] != ""
     )
+    bid_distances = [
+        parse_float(row["observed_ask"], "observed_ask") - parse_float(row["bid"], "bid")
+        for row in rows
+        if row["observed_ask"] != ""
+    ]
+    ask_distances = [
+        parse_float(row["ask"], "ask") - parse_float(row["observed_bid"], "observed_bid")
+        for row in rows
+        if row["observed_bid"] != ""
+    ]
+    avg_quote_distance = mean([mean(bid_distances), mean(ask_distances)])
+    policy_mode_counts = count_values(rows, "policy_mode", "static")
+    policy_trigger_counts = count_values(rows, "policy_trigger", "none")
+    main_trigger, main_trigger_steps = dominant_count(policy_trigger_counts, "none")
 
     return RunSummary(
         run_id=run_id(csv_path, metadata),
@@ -192,7 +223,12 @@ def summarize_run(csv_path: Path) -> RunSummary:
         max_inventory=max(inventories),
         avg_spread=mean(spreads),
         avg_volatility=mean(volatilities),
+        avg_quote_distance=avg_quote_distance,
         observed_quote_steps=observed_quote_steps,
+        adaptive_steps=policy_mode_counts.get("adaptive", 0),
+        static_steps=policy_mode_counts.get("static", 0),
+        main_trigger=main_trigger,
+        main_trigger_steps=main_trigger_steps,
     )
 
 
@@ -219,7 +255,12 @@ def write_summaries(path: Path, summaries: list[RunSummary]) -> None:
                 "max_inventory",
                 "avg_spread",
                 "avg_volatility",
+                "avg_quote_distance",
                 "observed_quote_steps",
+                "adaptive_steps",
+                "static_steps",
+                "main_trigger",
+                "main_trigger_steps",
                 "base_intensity",
                 "distance_decay",
                 "volatility_boost",
@@ -249,7 +290,12 @@ def summary_to_csv_row(summary: RunSummary) -> list[str]:
         format_float(summary.max_inventory),
         format_float(summary.avg_spread),
         format_float(summary.avg_volatility),
+        format_float(summary.avg_quote_distance),
         str(summary.observed_quote_steps),
+        str(summary.adaptive_steps),
+        str(summary.static_steps),
+        summary.main_trigger,
+        str(summary.main_trigger_steps),
         summary.base_intensity,
         summary.distance_decay,
         summary.volatility_boost,
@@ -271,6 +317,9 @@ def render_table(summaries: list[RunSummary]) -> str:
         "fees",
         "inv_min",
         "inv_max",
+        "quote_dist",
+        "adaptive",
+        "trigger",
     ]
     rows = [
         [
@@ -282,6 +331,9 @@ def render_table(summaries: list[RunSummary]) -> str:
             f"{summary.total_fees:.4f}",
             f"{summary.min_inventory:.4f}",
             f"{summary.max_inventory:.4f}",
+            f"{summary.avg_quote_distance:.4f}",
+            str(summary.adaptive_steps),
+            f"{summary.main_trigger}:{summary.main_trigger_steps}",
         ]
         for summary in summaries
     ]

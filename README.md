@@ -29,7 +29,7 @@ python3 research/write_project_report.py
 Run the learned selector against live public quotes in paper mode:
 
 ```bash
-python3 research/run_paper_live_report.py configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live.json \
+python3 research/run_paper_live_report.py configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live_long.json \
   --run-id solusd_demo
 ```
 
@@ -43,6 +43,8 @@ Latest seven-dataset research report:
 - `learned_selector` remains behind `adaptive` under the liquid-fill assumption.
 
 This is a small-sample research result, not evidence of a live trading edge.
+
+Latest live-paper demonstration: `300` public quote samples, `70` paper fills, final inventory `-0.2000`, and max drawdown `0.0059`.
 
 ### Other Runs
 
@@ -76,5 +78,5 @@ This project is developed as a learning and research effort with AI assistance f
 ### Roadmap
 
 - Preserve the final research result bundle.
-- Compare one longer live-paper learned-selector run against the short demo.
+- Add one final concise result report that ties replay research, learned selection, and live-paper behavior together.
 - Keep improving the learned policy only when new data exposes a concrete weakness.
