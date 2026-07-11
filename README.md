@@ -47,12 +47,13 @@ cargo run -- run configs/runs/sample_replay_sweep.json
 cargo run -- run configs/runs/sample_paper_session.json
 ```
 
-Run the research checks after generating reports:
+Run the current paper-policy research loop after collecting quote datasets:
 
 ```bash
-python3 research/calibrate_fill_model.py
-python3 research/compare_calibrations.py
-python3 research/validate_fill_model.py
+python3 research/policy_evaluation_gate.py
+python3 research/sweep_selector_policy.py
+python3 research/train_policy_selector.py
+python3 research/write_project_report.py
 ```
 
 ### Verify

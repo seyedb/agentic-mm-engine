@@ -73,14 +73,6 @@ Replay sweep rows are averaged across the configured seeds and ranked by stabili
 
 Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`, plus average regime step counts and execution attribution for low, normal, and high volatility. Step datasets include quote state, inventory, PnL, fills, fees, and adverse selection for ML/calibration work.
 
-Research utilities consume the generated step datasets:
-
-```bash
-python3 research/calibrate_fill_model.py
-python3 research/compare_calibrations.py
-python3 research/validate_fill_model.py
-```
-
 Use `research/analyze_steps.py <path>` when you want a detailed look at one exported step dataset.
 
 Use `research/analyze_replay_sweep.py <path>` to summarize replay sweep sensitivity by spread, quantity, and skew.
@@ -88,11 +80,7 @@ Use `research/analyze_replay_sweep.py <path>` to summarize replay sweep sensitiv
 Use `research/compare_replay_sweeps.py <paths>` to compare best replay parameters across datasets.
 It writes `target/research/replay_sweep_best.csv` and `target/research/replay_sweep_parameters.csv`.
 
-The calibration utility estimates empirical fill probability and fill intensity by regime, spread bucket, and volatility bucket. It writes a JSON report to `target/research/` for later model comparison or calibration work.
-
-The comparison utility reads calibration reports and writes a compact cross-experiment CSV summary to `target/research/fill_calibration_comparison.csv`.
-
-The validation utility reads that comparison CSV and writes a pass/warn model-behavior report to `target/research/fill_model_validation.txt`.
+For paper-policy, selector, and learned-agent experiments, use the shorter workflow in [workflow.md](workflow.md).
 
 ## Score
 
