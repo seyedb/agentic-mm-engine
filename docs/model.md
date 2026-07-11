@@ -110,6 +110,12 @@ Paper sessions can run with static, adaptive, hybrid, or selector policies. The 
 
 Paper-session rows include `policy_mode` and `policy_trigger`, so reports can distinguish normal static behavior from adaptive behavior caused by inventory, drawdown, volatility, or multiple risk triggers.
 
+## Learned Policy Selector
+
+The first ML-agent proof of concept is intentionally small. The Python research script `research/train_policy_selector.py` trains a threshold gate from paper-session window results. The gate observes normalized market-state features and chooses between a conservative policy and a more active policy, then validates the choice by leaving one quote dataset out.
+
+This keeps the learning loop outside the Rust accounting engine. Rust remains the deterministic simulator and paper-session runner; Python trains and evaluates policy-selection rules. A learned gate must beat simple baselines on held-out quote datasets before it should be treated as more than an experimental controller.
+
 ## Fills
 
 The legacy fill model samples a noisy market price and fills crossed quotes:
