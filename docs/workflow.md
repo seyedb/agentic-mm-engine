@@ -241,6 +241,20 @@ target/research/adaptive_policy_sweep_variants.csv
 target/research/adaptive_policy_sweep_runs.csv
 ```
 
+Sweep selector policy weights across collected quote datasets:
+
+```bash
+python3 research/sweep_selector_policy.py
+```
+
+This ranks weighted selector variants by risk-adjusted utility, while penalizing selectors that behave like always-adaptive or never-adaptive policies. It writes:
+
+```text
+target/research/selector_policy_sweep.csv
+target/research/selector_policy_sweep_runs.csv
+target/research/selector_policy_sweep.md
+```
+
 Build a ledger across collected quote datasets:
 
 ```bash
