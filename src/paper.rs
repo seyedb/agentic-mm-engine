@@ -64,6 +64,19 @@ pub enum PaperPolicyConfig {
         inventory_threshold: f64,
         volatility_threshold: f64,
     },
+    #[serde(rename = "selector")]
+    Selector {
+        min_spread: f64,
+        max_spread: f64,
+        volatility_spread_multiplier: f64,
+        inventory_skew_multiplier: f64,
+        touch_spread_multiplier: f64,
+        volatility_weight: f64,
+        spread_weight: f64,
+        inventory_weight: f64,
+        drawdown_weight: f64,
+        activation_threshold: f64,
+    },
 }
 
 impl Default for PaperPolicyConfig {
@@ -124,6 +137,7 @@ pub enum PaperPolicyTrigger {
     Inventory,
     Drawdown,
     Volatility,
+    Spread,
     Multiple,
 }
 
@@ -331,6 +345,38 @@ fn apply_paper_policy(
                 }
             }
         }
+        PaperPolicyConfig::Selector {
+            min_spread,
+            max_spread,
+            volatility_spread_multiplier,
+            inventory_skew_multiplier,
+            touch_spread_multiplier,
+            volatility_weight,
+            spread_weight,
+            inventory_weight,
+            drawdown_weight,
+            activation_threshold,
+        } => selector_policy_decision(
+            quote,
+            state,
+            observed_quote,
+            estimated_volatility,
+            current_drawdown,
+            AdaptivePolicyParams {
+                min_spread,
+                max_spread,
+                volatility_spread_multiplier,
+                inventory_skew_multiplier,
+                touch_spread_multiplier,
+            },
+            SelectorPolicyParams {
+                volatility_weight,
+                spread_weight,
+                inventory_weight,
+                drawdown_weight,
+                activation_threshold,
+            },
+        ),
     }
 }
 
@@ -348,6 +394,94 @@ struct AdaptivePolicyParams {
     volatility_spread_multiplier: f64,
     inventory_skew_multiplier: f64,
     touch_spread_multiplier: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SelectorPolicyParams {
+    volatility_weight: f64,
+    spread_weight: f64,
+    inventory_weight: f64,
+    drawdown_weight: f64,
+    activation_threshold: f64,
+}
+
+fn selector_policy_decision(
+    quote: Quote,
+    state: &SystemState,
+    observed_quote: Option<Quote>,
+    estimated_volatility: f64,
+    current_drawdown: f64,
+    adaptive_params: AdaptivePolicyParams,
+    selector_params: SelectorPolicyParams,
+) -> PaperPolicyDecision {
+    let spread = observed_quote
+        .map(|quote| quote.spread())
+        .unwrap_or(quote.spread());
+    let contributions = [
+        (
+            PaperPolicyTrigger::Volatility,
+            estimated_volatility * selector_params.volatility_weight,
+        ),
+        (
+            PaperPolicyTrigger::Spread,
+            spread * selector_params.spread_weight,
+        ),
+        (
+            PaperPolicyTrigger::Inventory,
+            state.inventory.abs() * selector_params.inventory_weight,
+        ),
+        (
+            PaperPolicyTrigger::Drawdown,
+            current_drawdown * selector_params.drawdown_weight,
+        ),
+    ];
+    let score = contributions
+        .iter()
+        .map(|(_trigger, contribution)| contribution)
+        .sum::<f64>();
+
+    if score < selector_params.activation_threshold {
+        return PaperPolicyDecision {
+            quote,
+            mode: PaperPolicyMode::Static,
+            trigger: PaperPolicyTrigger::None,
+        };
+    }
+
+    let trigger = dominant_selector_trigger(contributions);
+    PaperPolicyDecision {
+        quote: adaptive_quote(
+            quote,
+            state,
+            observed_quote,
+            estimated_volatility,
+            adaptive_params,
+        ),
+        mode: PaperPolicyMode::Adaptive,
+        trigger,
+    }
+}
+
+fn dominant_selector_trigger(contributions: [(PaperPolicyTrigger, f64); 4]) -> PaperPolicyTrigger {
+    let mut best_trigger = PaperPolicyTrigger::None;
+    let mut best_value = 0.0;
+    let mut ties = 0;
+
+    for (trigger, value) in contributions {
+        if value > best_value {
+            best_trigger = trigger;
+            best_value = value;
+            ties = 1;
+        } else if value == best_value && value > 0.0 {
+            ties += 1;
+        }
+    }
+
+    if ties > 1 {
+        PaperPolicyTrigger::Multiple
+    } else {
+        best_trigger
+    }
 }
 
 fn adaptive_policy_trigger(
@@ -696,6 +830,7 @@ fn policy_trigger_name(trigger: PaperPolicyTrigger) -> &'static str {
         PaperPolicyTrigger::Inventory => "inventory",
         PaperPolicyTrigger::Drawdown => "drawdown",
         PaperPolicyTrigger::Volatility => "volatility",
+        PaperPolicyTrigger::Spread => "spread",
         PaperPolicyTrigger::Multiple => "multiple",
     }
 }
@@ -946,6 +1081,75 @@ mod tests {
         assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
         assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);
         assert!((decision.quote.spread() - 0.12).abs() < 1e-12);
+    }
+
+    #[test]
+    fn selector_policy_keeps_static_quote_below_activation_threshold() {
+        let state = SystemState::new(100.0);
+        let input = Quote {
+            bid: 99.99,
+            ask: 100.01,
+        };
+        let decision = apply_paper_policy(
+            input,
+            &state,
+            Some(Quote {
+                bid: 99.99,
+                ask: 100.01,
+            }),
+            0.001,
+            0.0,
+            PaperPolicyConfig::Selector {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+                volatility_weight: 1.0,
+                spread_weight: 1.0,
+                inventory_weight: 1.0,
+                drawdown_weight: 1.0,
+                activation_threshold: 1.0,
+            },
+        );
+
+        assert_eq!(decision.quote, input);
+        assert_eq!(decision.mode, PaperPolicyMode::Static);
+        assert_eq!(decision.trigger, PaperPolicyTrigger::None);
+    }
+
+    #[test]
+    fn selector_policy_uses_adaptive_quote_above_activation_threshold() {
+        let state = SystemState::new(100.0);
+        let decision = apply_paper_policy(
+            Quote {
+                bid: 99.99,
+                ask: 100.01,
+            },
+            &state,
+            Some(Quote {
+                bid: 99.90,
+                ask: 100.10,
+            }),
+            0.01,
+            0.0,
+            PaperPolicyConfig::Selector {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+                volatility_weight: 20.0,
+                spread_weight: 1.0,
+                inventory_weight: 0.0,
+                drawdown_weight: 0.0,
+                activation_threshold: 0.10,
+            },
+        );
+
+        assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
+        assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);
+        assert!((decision.quote.spread() - 0.11).abs() < 1e-12);
     }
 
     #[test]

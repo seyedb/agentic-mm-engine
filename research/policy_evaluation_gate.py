@@ -19,6 +19,7 @@ DEFAULT_METADATA_PATTERN = "data/quotes/*.meta.json"
 DEFAULT_STATIC_CONFIG = Path("configs/runs/kraken_solusd_maker_fee_paper_session.json")
 DEFAULT_ADAPTIVE_CONFIG = Path("configs/runs/kraken_solusd_adaptive_maker_fee_paper_session.json")
 DEFAULT_HYBRID_CONFIG = Path("configs/runs/kraken_solusd_hybrid_maker_fee_paper_session.json")
+DEFAULT_SELECTOR_CONFIG = Path("configs/runs/kraken_solusd_selector_maker_fee_paper_session.json")
 DEFAULT_WORK_DIR = Path("target/research/policy_gate")
 DEFAULT_DATASET_OUTPUT = Path("target/research/policy_gate_dataset_summary.csv")
 DEFAULT_WINDOW_OUTPUT = Path("target/research/policy_gate_window_results.csv")
@@ -86,6 +87,7 @@ class WindowRow:
     trigger_inventory_steps: int
     trigger_drawdown_steps: int
     trigger_volatility_steps: int
+    trigger_spread_steps: int
     trigger_multiple_steps: int
     avg_spread: float
     avg_quote_distance: float
@@ -109,6 +111,7 @@ class PolicySummary:
     trigger_inventory_steps: int
     trigger_drawdown_steps: int
     trigger_volatility_steps: int
+    trigger_spread_steps: int
     trigger_multiple_steps: int
     dataset_utility_wins: int
     window_utility_wins: int
@@ -124,6 +127,7 @@ class RunDiagnostics:
     trigger_inventory_steps: int
     trigger_drawdown_steps: int
     trigger_volatility_steps: int
+    trigger_spread_steps: int
     trigger_multiple_steps: int
 
 
@@ -148,6 +152,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--static-config", type=Path, default=DEFAULT_STATIC_CONFIG)
     parser.add_argument("--adaptive-config", type=Path, default=DEFAULT_ADAPTIVE_CONFIG)
     parser.add_argument("--hybrid-config", type=Path, default=DEFAULT_HYBRID_CONFIG)
+    parser.add_argument("--selector-config", type=Path, default=DEFAULT_SELECTOR_CONFIG)
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIR)
     parser.add_argument("--dataset-output", type=Path, default=DEFAULT_DATASET_OUTPUT)
     parser.add_argument("--window-output", type=Path, default=DEFAULT_WINDOW_OUTPUT)
@@ -276,6 +281,7 @@ def load_policy_configs(args: argparse.Namespace) -> list[tuple[str, dict[str, A
         project_path(args.static_config),
         project_path(args.adaptive_config),
         project_path(args.hybrid_config),
+        project_path(args.selector_config),
     ]
     configs = []
     for path in paths:
@@ -394,6 +400,7 @@ def read_window_rows(path: Path, assumption: FillAssumption, dataset: Dataset, a
                     trigger_inventory_steps=diagnostics.trigger_inventory_steps,
                     trigger_drawdown_steps=diagnostics.trigger_drawdown_steps,
                     trigger_volatility_steps=diagnostics.trigger_volatility_steps,
+                    trigger_spread_steps=diagnostics.trigger_spread_steps,
                     trigger_multiple_steps=diagnostics.trigger_multiple_steps,
                     avg_spread=parse_float(row, "avg_spread"),
                     avg_quote_distance=parse_float(row, "avg_quote_distance"),
@@ -427,6 +434,7 @@ def read_run_diagnostics(path: Path) -> RunDiagnostics:
             "inventory": 0,
             "drawdown": 0,
             "volatility": 0,
+            "spread": 0,
             "multiple": 0,
         }
         for row in reader:
@@ -449,6 +457,7 @@ def read_run_diagnostics(path: Path) -> RunDiagnostics:
         trigger_inventory_steps=trigger_counts["inventory"],
         trigger_drawdown_steps=trigger_counts["drawdown"],
         trigger_volatility_steps=trigger_counts["volatility"],
+        trigger_spread_steps=trigger_counts["spread"],
         trigger_multiple_steps=trigger_counts["multiple"],
     )
 
@@ -569,6 +578,7 @@ def summarize_policies(aggregate_rows: list[AggregateRow], window_rows: list[Win
                 trigger_volatility_steps=sum(
                     row.trigger_volatility_steps for row in policy_windows
                 ),
+                trigger_spread_steps=sum(row.trigger_spread_steps for row in policy_windows),
                 trigger_multiple_steps=sum(row.trigger_multiple_steps for row in policy_windows),
                 dataset_utility_wins=dataset_wins.get((assumption, policy), 0),
                 window_utility_wins=window_wins.get((assumption, policy), 0),
@@ -686,6 +696,7 @@ def write_window_rows(path: Path, rows: list[WindowRow]) -> None:
                 "trigger_inventory_steps",
                 "trigger_drawdown_steps",
                 "trigger_volatility_steps",
+                "trigger_spread_steps",
                 "trigger_multiple_steps",
                 "avg_spread",
                 "avg_quote_distance",
@@ -718,6 +729,7 @@ def window_row_to_csv(row: WindowRow) -> list[str]:
         str(row.trigger_inventory_steps),
         str(row.trigger_drawdown_steps),
         str(row.trigger_volatility_steps),
+        str(row.trigger_spread_steps),
         str(row.trigger_multiple_steps),
         format_float(row.avg_spread),
         format_float(row.avg_quote_distance),
@@ -747,6 +759,7 @@ def write_policy_summaries(path: Path, rows: list[PolicySummary]) -> None:
                 "trigger_inventory_steps",
                 "trigger_drawdown_steps",
                 "trigger_volatility_steps",
+                "trigger_spread_steps",
                 "trigger_multiple_steps",
                 "dataset_utility_wins",
                 "window_utility_wins",
@@ -773,6 +786,7 @@ def policy_summary_to_csv(row: PolicySummary) -> list[str]:
         str(row.trigger_inventory_steps),
         str(row.trigger_drawdown_steps),
         str(row.trigger_volatility_steps),
+        str(row.trigger_spread_steps),
         str(row.trigger_multiple_steps),
         str(row.dataset_utility_wins),
         str(row.window_utility_wins),
@@ -788,6 +802,7 @@ def render_report(
     configured = [row for row in summaries if row.assumption == "configured"]
     configured_winner = max(configured, key=lambda row: row.mean_utility) if configured else None
     configured_hybrid = first_summary(configured, "hybrid")
+    configured_selector = first_summary(configured, "selector")
     stable_winner = stability_winner(summaries, assumptions)
     lines = [
         "# Policy Evaluation Gate",
@@ -796,6 +811,7 @@ def render_report(
         "",
         f"- Datasets: {len(datasets)}",
         f"- Fill assumptions: {', '.join(assumption.name for assumption in assumptions)}",
+        "- Policies: static, adaptive, hybrid, selector",
         f"- Window size: {args.window_size}",
         f"- Step size: {args.step_size}",
         f"- Utility: `pnl - {format_float(args.drawdown_weight)} * drawdown - "
@@ -821,6 +837,12 @@ def render_report(
             f"- Configured hybrid adaptive-step rate: "
             f"{format_float(configured_hybrid.adaptive_step_pct)}%; "
             f"triggers: {trigger_summary(configured_hybrid)}."
+        )
+    if configured_selector:
+        lines.append(
+            f"- Configured selector adaptive-step rate: "
+            f"{format_float(configured_selector.adaptive_step_pct)}%; "
+            f"triggers: {trigger_summary(configured_selector)}."
         )
     lines.extend(
         [
@@ -849,7 +871,8 @@ def render_report(
             "- If static wins utility, the adaptive logic is still mainly a risk-control experiment.",
             "- If adaptive wins utility but loses PnL, it is reducing risk at a measurable cost.",
             "- If hybrid wins utility, the risk-trigger idea is worth tuning next.",
-            "- The next serious extension should be a policy selector only after this gate shows stable utility evidence.",
+            "- If selector wins utility, the agentic policy-selection path is worth extending.",
+            "- If selector loses, inspect its trigger attribution before changing weights.",
             "",
         ]
     )
@@ -880,6 +903,7 @@ def trigger_summary(row: PolicySummary) -> str:
         ("inventory", row.trigger_inventory_steps),
         ("drawdown", row.trigger_drawdown_steps),
         ("volatility", row.trigger_volatility_steps),
+        ("spread", row.trigger_spread_steps),
         ("multiple", row.trigger_multiple_steps),
     ]
     active = [f"{name}:{count}" for name, count in parts if count]

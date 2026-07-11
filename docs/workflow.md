@@ -194,6 +194,7 @@ The default live config keeps quoting active. Use `configs/runs/kraken_solusd_fe
 Use `configs/runs/kraken_solusd_maker_fee_paper_live.json` to test the same quoting logic under a lower passive maker-fee assumption.
 Use `configs/runs/kraken_solusd_adaptive_maker_fee_paper_live.json` to test the first adaptive paper policy.
 Use `configs/runs/kraken_solusd_hybrid_maker_fee_paper_live.json` to test static quoting with adaptive risk triggers.
+Use `configs/runs/kraken_solusd_selector_maker_fee_paper_live.json` to test weighted policy selection from market state.
 
 Compare paper-session config assumptions on the same quote replay:
 
@@ -212,6 +213,7 @@ python3 research/evaluate_paper_policies.py \
   configs/runs/kraken_solusd_maker_fee_paper_session.json \
   configs/runs/kraken_solusd_adaptive_maker_fee_paper_session.json \
   configs/runs/kraken_solusd_hybrid_maker_fee_paper_session.json \
+  configs/runs/kraken_solusd_selector_maker_fee_paper_session.json \
   --window-size 10 \
   --step-size 10
 ```
@@ -293,7 +295,7 @@ Run the full policy evaluation gate:
 python3 research/policy_evaluation_gate.py
 ```
 
-This evaluates static, adaptive, and hybrid policies across collected quote datasets, reruns a small fill-assumption sensitivity check, includes policy-trigger attribution, and writes:
+This evaluates static, adaptive, hybrid, and selector policies across collected quote datasets, reruns a small fill-assumption sensitivity check, includes policy-trigger attribution, and writes:
 
 ```text
 target/research/policy_gate_dataset_summary.csv

@@ -106,7 +106,7 @@ This is intentionally simple. The controller is the decision layer where later p
 
 ## Paper Policy
 
-Paper sessions can run with static, adaptive, or hybrid policies. The static policy uses the controller quote unchanged. The adaptive policy widens quotes using observed top-of-book spread and estimated volatility, then skews the quote center away from current inventory. The hybrid policy keeps the static quote during normal conditions and switches to the adaptive quote when drawdown, inventory, or volatility crosses configured thresholds.
+Paper sessions can run with static, adaptive, hybrid, or selector policies. The static policy uses the controller quote unchanged. The adaptive policy widens quotes using observed top-of-book spread and estimated volatility, then skews the quote center away from current inventory. The hybrid policy keeps the static quote during normal conditions and switches to the adaptive quote when drawdown, inventory, or volatility crosses configured thresholds. The selector policy is the first explicit agentic layer: it scores market-state features and chooses static or adaptive quoting from that score.
 
 Paper-session rows include `policy_mode` and `policy_trigger`, so reports can distinguish normal static behavior from adaptive behavior caused by inventory, drawdown, volatility, or multiple risk triggers.
 
