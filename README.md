@@ -20,10 +20,13 @@ The project now includes an agentic proof of concept: Python trains a small logi
 ### Quickstart
 
 ```bash
-python3 research/policy_evaluation_gate.py
-python3 research/train_policy_selector.py
-python3 research/policy_evaluation_gate.py
-python3 research/write_project_report.py
+python3 research/run_research_pipeline.py
+```
+
+For quick report regeneration from existing policy-gate outputs:
+
+```bash
+python3 research/run_research_pipeline.py --skip-policy-gates
 ```
 
 Run the learned selector against live public quotes in paper mode:
@@ -79,5 +82,5 @@ This project is developed as a learning and research effort with AI assistance f
 ### Roadmap
 
 - Preserve the final research result bundle.
-- Treat contextual-bandit or reinforcement-style selection as a later research extension.
+- Improve the contextual-bandit selector only if offline out-of-sample tests beat simpler selectors.
 - Keep improving the learned policy only when new data exposes a concrete weakness.

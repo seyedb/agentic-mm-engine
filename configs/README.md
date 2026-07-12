@@ -36,9 +36,11 @@ Paper-policy configs used by the research loop:
 - `configs/runs/kraken_solusd_selector_maker_fee_paper_session.json`
 - `configs/runs/kraken_solusd_learned_selector_maker_fee_paper_session.json`
 
-Live paper config:
+Live paper configs:
 
 ```bash
 cargo run -- run configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live.json
 cargo run -- run configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live_long.json
 ```
+
+Use the `_long` config for the documented live-paper demonstration.
