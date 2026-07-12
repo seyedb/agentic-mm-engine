@@ -5,7 +5,10 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{ControllerMode, MarketMakingAgent, RuleBasedControllerParams};
+use crate::agent::{
+    AgentObservation, ControllerMode, MarketMakingAgent, PolicyAction, PolicyAgent,
+    PolicyAgentDecision, PolicyAgentKind, PolicyReason, RuleBasedControllerParams,
+};
 use crate::engine::simulation::{MarketRegime, RegimeConfig};
 use crate::engine::state::SystemState;
 use crate::market::{Fill, MarketEvent, Quote};
@@ -133,6 +136,9 @@ pub struct PaperSessionRow {
     pub estimated_volatility: f64,
     pub regime: MarketRegime,
     pub agent_mode: ControllerMode,
+    pub policy_agent: PolicyAgentKind,
+    pub policy_action: PolicyAction,
+    pub policy_score: Option<f64>,
     pub policy_mode: PaperPolicyMode,
     pub policy_trigger: PaperPolicyTrigger,
     pub bid: f64,
@@ -258,6 +264,16 @@ impl PaperSessionRunner {
             drawdown: current_drawdown,
         });
         let learned_features = self.learned_features.snapshot();
+        let observation = AgentObservation {
+            estimated_volatility,
+            observed_spread: observed_quote.map(|quote| quote.spread()).unwrap_or(0.0),
+            max_observed_spread: learned_features
+                .map(|features| features.max_observed_spread)
+                .unwrap_or(0.0),
+            abs_mid_move: mid_move,
+            abs_inventory: state.inventory.abs(),
+            drawdown: current_drawdown,
+        };
         let policy_decision = apply_paper_policy(
             PaperPolicyInput {
                 quote: decision.quote,
@@ -265,6 +281,7 @@ impl PaperSessionRunner {
                 observed_quote,
                 estimated_volatility,
                 current_drawdown,
+                observation,
             },
             &self.config.policy,
             self.learned_model.as_ref(),
@@ -304,6 +321,9 @@ impl PaperSessionRunner {
             estimated_volatility,
             regime,
             agent_mode: decision.mode,
+            policy_agent: policy_decision.agent.agent,
+            policy_action: policy_decision.agent.action,
+            policy_score: policy_decision.agent.score,
             policy_mode: policy_decision.mode,
             policy_trigger: policy_decision.trigger,
             quote,
@@ -325,6 +345,12 @@ fn apply_paper_policy(
             quote: input.quote,
             mode: PaperPolicyMode::Static,
             trigger: PaperPolicyTrigger::None,
+            agent: PolicyAgentDecision {
+                agent: PolicyAgentKind::Static,
+                action: PolicyAction::Static,
+                reason: PolicyReason::None,
+                score: None,
+            },
         },
         PaperPolicyConfig::Adaptive {
             min_spread,
@@ -348,6 +374,12 @@ fn apply_paper_policy(
             ),
             mode: PaperPolicyMode::Adaptive,
             trigger: PaperPolicyTrigger::Configured,
+            agent: PolicyAgentDecision {
+                agent: PolicyAgentKind::Adaptive,
+                action: PolicyAction::Adaptive,
+                reason: PolicyReason::Configured,
+                score: None,
+            },
         },
         PaperPolicyConfig::Hybrid {
             min_spread,
@@ -372,6 +404,12 @@ fn apply_paper_policy(
                     quote: input.quote,
                     mode: PaperPolicyMode::Static,
                     trigger,
+                    agent: PolicyAgentDecision {
+                        agent: PolicyAgentKind::Hybrid,
+                        action: PolicyAction::Static,
+                        reason: PolicyReason::None,
+                        score: None,
+                    },
                 }
             } else {
                 PaperPolicyDecision {
@@ -390,6 +428,12 @@ fn apply_paper_policy(
                     ),
                     mode: PaperPolicyMode::Adaptive,
                     trigger,
+                    agent: PolicyAgentDecision {
+                        agent: PolicyAgentKind::Hybrid,
+                        action: PolicyAction::Adaptive,
+                        reason: policy_reason_from_trigger(trigger),
+                        score: None,
+                    },
                 }
             }
         }
@@ -409,7 +453,7 @@ fn apply_paper_policy(
             input.state,
             input.observed_quote,
             input.estimated_volatility,
-            input.current_drawdown,
+            input.observation,
             AdaptivePolicyParams {
                 min_spread,
                 max_spread,
@@ -446,6 +490,7 @@ struct PaperPolicyInput<'a> {
     observed_quote: Option<Quote>,
     estimated_volatility: f64,
     current_drawdown: f64,
+    observation: AgentObservation,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -453,6 +498,7 @@ struct PaperPolicyDecision {
     quote: Quote,
     mode: PaperPolicyMode,
     trigger: PaperPolicyTrigger,
+    agent: PolicyAgentDecision,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -471,6 +517,84 @@ struct SelectorPolicyParams {
     inventory_weight: f64,
     drawdown_weight: f64,
     activation_threshold: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SelectorPolicyAgent {
+    params: SelectorPolicyParams,
+}
+
+impl PolicyAgent for SelectorPolicyAgent {
+    fn decide(&self, observation: AgentObservation) -> PolicyAgentDecision {
+        let contributions = [
+            (
+                PolicyReason::Volatility,
+                observation.estimated_volatility * self.params.volatility_weight,
+            ),
+            (
+                PolicyReason::Spread,
+                observation.observed_spread * self.params.spread_weight,
+            ),
+            (
+                PolicyReason::Inventory,
+                observation.abs_inventory * self.params.inventory_weight,
+            ),
+            (
+                PolicyReason::Drawdown,
+                observation.drawdown * self.params.drawdown_weight,
+            ),
+        ];
+        let score = contributions
+            .iter()
+            .map(|(_reason, contribution)| contribution)
+            .sum::<f64>();
+
+        if score < self.params.activation_threshold {
+            return PolicyAgentDecision {
+                agent: PolicyAgentKind::Selector,
+                action: PolicyAction::Static,
+                reason: PolicyReason::None,
+                score: Some(score),
+            };
+        }
+
+        PolicyAgentDecision {
+            agent: PolicyAgentKind::Selector,
+            action: PolicyAction::Adaptive,
+            reason: dominant_policy_reason(contributions),
+            score: Some(score),
+        }
+    }
+}
+
+struct LearnedSelectorAgent<'a> {
+    model: &'a LearnedPolicyModel,
+}
+
+impl PolicyAgent for LearnedSelectorAgent<'_> {
+    fn decide(&self, observation: AgentObservation) -> PolicyAgentDecision {
+        let features = LearnedFeatureSnapshot {
+            estimated_volatility: observation.estimated_volatility,
+            observed_spread: observation.observed_spread,
+            max_observed_spread: observation.max_observed_spread,
+            abs_mid_move: observation.abs_mid_move,
+            abs_inventory: observation.abs_inventory,
+            drawdown: observation.drawdown,
+        };
+        let score = learned_policy_score(self.model, features);
+        let action = if score >= self.model.threshold {
+            self.model.action_on.as_str()
+        } else {
+            self.model.action_off.as_str()
+        };
+
+        PolicyAgentDecision {
+            agent: PolicyAgentKind::LearnedSelector,
+            action: policy_action_from_model_action(action),
+            reason: PolicyReason::ModelScore,
+            score: Some(score),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -532,45 +656,25 @@ fn selector_policy_decision(
     state: &SystemState,
     observed_quote: Option<Quote>,
     estimated_volatility: f64,
-    current_drawdown: f64,
+    observation: AgentObservation,
     adaptive_params: AdaptivePolicyParams,
     selector_params: SelectorPolicyParams,
 ) -> PaperPolicyDecision {
-    let spread = observed_quote
-        .map(|quote| quote.spread())
-        .unwrap_or(quote.spread());
-    let contributions = [
-        (
-            PaperPolicyTrigger::Volatility,
-            estimated_volatility * selector_params.volatility_weight,
-        ),
-        (
-            PaperPolicyTrigger::Spread,
-            spread * selector_params.spread_weight,
-        ),
-        (
-            PaperPolicyTrigger::Inventory,
-            state.inventory.abs() * selector_params.inventory_weight,
-        ),
-        (
-            PaperPolicyTrigger::Drawdown,
-            current_drawdown * selector_params.drawdown_weight,
-        ),
-    ];
-    let score = contributions
-        .iter()
-        .map(|(_trigger, contribution)| contribution)
-        .sum::<f64>();
+    let agent = SelectorPolicyAgent {
+        params: selector_params,
+    };
+    let decision = agent.decide(observation);
 
-    if score < selector_params.activation_threshold {
+    if decision.action == PolicyAction::Static {
         return PaperPolicyDecision {
             quote,
             mode: PaperPolicyMode::Static,
             trigger: PaperPolicyTrigger::None,
+            agent: decision,
         };
     }
 
-    let trigger = dominant_selector_trigger(contributions);
+    let trigger = paper_trigger_from_reason(decision.reason);
     PaperPolicyDecision {
         quote: adaptive_quote(
             quote,
@@ -581,6 +685,7 @@ fn selector_policy_decision(
         ),
         mode: PaperPolicyMode::Adaptive,
         trigger,
+        agent: decision,
     }
 }
 
@@ -591,19 +696,24 @@ fn learned_selector_policy_decision(
     model: &LearnedPolicyModel,
     features: LearnedFeatureSnapshot,
 ) -> PaperPolicyDecision {
-    let action = if learned_policy_score(model, features) >= model.threshold {
-        model.action_on.as_str()
-    } else {
-        model.action_off.as_str()
-    };
+    let agent = LearnedSelectorAgent { model };
+    let agent_decision = agent.decide(AgentObservation {
+        estimated_volatility: features.estimated_volatility,
+        observed_spread: features.observed_spread,
+        max_observed_spread: features.max_observed_spread,
+        abs_mid_move: features.abs_mid_move,
+        abs_inventory: features.abs_inventory,
+        drawdown: features.drawdown,
+    });
 
-    match action {
-        "static" => PaperPolicyDecision {
+    match agent_decision.action {
+        PolicyAction::Static => PaperPolicyDecision {
             quote: input.quote,
             mode: PaperPolicyMode::Static,
             trigger: PaperPolicyTrigger::None,
+            agent: agent_decision,
         },
-        "adaptive" => PaperPolicyDecision {
+        PolicyAction::Adaptive => PaperPolicyDecision {
             quote: adaptive_quote(
                 input.quote,
                 input.state,
@@ -613,16 +723,29 @@ fn learned_selector_policy_decision(
             ),
             mode: PaperPolicyMode::Adaptive,
             trigger: PaperPolicyTrigger::Configured,
+            agent: agent_decision,
         },
-        "selector" => selector_policy_decision(
-            input.quote,
-            input.state,
-            input.observed_quote,
-            input.estimated_volatility,
-            input.current_drawdown,
-            adaptive_config.into(),
-            selector_config.into(),
-        ),
+        PolicyAction::Selector => {
+            let mut selector_decision = selector_policy_decision(
+                input.quote,
+                input.state,
+                input.observed_quote,
+                input.estimated_volatility,
+                input.observation,
+                adaptive_config.into(),
+                selector_config.into(),
+            );
+            selector_decision.agent = agent_decision;
+            selector_decision
+        }
+    }
+}
+
+fn policy_action_from_model_action(action: &str) -> PolicyAction {
+    match action {
+        "static" => PolicyAction::Static,
+        "adaptive" => PolicyAction::Adaptive,
+        "selector" => PolicyAction::Selector,
         other => panic!("learned selector model chose unsupported action {other:?}"),
     }
 }
@@ -687,14 +810,14 @@ fn validate_learned_policy_model(path: &str, model: &LearnedPolicyModel) {
     }
 }
 
-fn dominant_selector_trigger(contributions: [(PaperPolicyTrigger, f64); 4]) -> PaperPolicyTrigger {
-    let mut best_trigger = PaperPolicyTrigger::None;
+fn dominant_policy_reason(contributions: [(PolicyReason, f64); 4]) -> PolicyReason {
+    let mut best_reason = PolicyReason::None;
     let mut best_value = 0.0;
     let mut ties = 0;
 
-    for (trigger, value) in contributions {
+    for (reason, value) in contributions {
         if value > best_value {
-            best_trigger = trigger;
+            best_reason = reason;
             best_value = value;
             ties = 1;
         } else if value == best_value && value > 0.0 {
@@ -703,9 +826,33 @@ fn dominant_selector_trigger(contributions: [(PaperPolicyTrigger, f64); 4]) -> P
     }
 
     if ties > 1 {
-        PaperPolicyTrigger::Multiple
+        PolicyReason::Multiple
     } else {
-        best_trigger
+        best_reason
+    }
+}
+
+fn policy_reason_from_trigger(trigger: PaperPolicyTrigger) -> PolicyReason {
+    match trigger {
+        PaperPolicyTrigger::None => PolicyReason::None,
+        PaperPolicyTrigger::Configured => PolicyReason::Configured,
+        PaperPolicyTrigger::Inventory => PolicyReason::Inventory,
+        PaperPolicyTrigger::Drawdown => PolicyReason::Drawdown,
+        PaperPolicyTrigger::Volatility => PolicyReason::Volatility,
+        PaperPolicyTrigger::Spread => PolicyReason::Spread,
+        PaperPolicyTrigger::Multiple => PolicyReason::Multiple,
+    }
+}
+
+fn paper_trigger_from_reason(reason: PolicyReason) -> PaperPolicyTrigger {
+    match reason {
+        PolicyReason::None | PolicyReason::ModelScore => PaperPolicyTrigger::None,
+        PolicyReason::Configured => PaperPolicyTrigger::Configured,
+        PolicyReason::Inventory => PaperPolicyTrigger::Inventory,
+        PolicyReason::Drawdown => PaperPolicyTrigger::Drawdown,
+        PolicyReason::Volatility => PaperPolicyTrigger::Volatility,
+        PolicyReason::Spread => PaperPolicyTrigger::Spread,
+        PolicyReason::Multiple => PaperPolicyTrigger::Multiple,
     }
 }
 
@@ -786,7 +933,7 @@ pub fn paper_session_to_csv(result: &PaperSessionResult) -> String {
 }
 
 pub fn paper_session_csv_header() -> &'static str {
-    "timestamp_ms,mid_price,observed_bid,observed_ask,estimated_volatility,regime,agent_mode,policy_mode,policy_trigger,bid,ask,spread,inventory,cash,pnl,drawdown,fills,buy_fills,sell_fills,fill_quantity,fill_notional,fees"
+    "timestamp_ms,mid_price,observed_bid,observed_ask,estimated_volatility,regime,agent_mode,policy_agent,policy_action,policy_score,policy_mode,policy_trigger,bid,ask,spread,inventory,cash,pnl,drawdown,fills,buy_fills,sell_fills,fill_quantity,fill_notional,fees"
 }
 
 pub fn paper_session_row_to_csv(row: &PaperSessionRow) -> String {
@@ -798,6 +945,9 @@ pub fn paper_session_row_to_csv(row: &PaperSessionRow) -> String {
         format_f64(row.estimated_volatility),
         regime_name(row.regime).to_string(),
         controller_mode_name(&row.agent_mode).to_string(),
+        policy_agent_name(row.policy_agent).to_string(),
+        policy_action_name(row.policy_action).to_string(),
+        optional_f64(row.policy_score),
         policy_mode_name(row.policy_mode).to_string(),
         policy_trigger_name(row.policy_trigger).to_string(),
         format_f64(row.bid),
@@ -823,6 +973,9 @@ struct SessionRowInput<'a> {
     estimated_volatility: f64,
     regime: MarketRegime,
     agent_mode: ControllerMode,
+    policy_agent: PolicyAgentKind,
+    policy_action: PolicyAction,
+    policy_score: Option<f64>,
     policy_mode: PaperPolicyMode,
     policy_trigger: PaperPolicyTrigger,
     quote: Quote,
@@ -857,6 +1010,9 @@ fn session_row(input: SessionRowInput<'_>) -> PaperSessionRow {
         estimated_volatility: input.estimated_volatility,
         regime: input.regime,
         agent_mode: input.agent_mode,
+        policy_agent: input.policy_agent,
+        policy_action: input.policy_action,
+        policy_score: input.policy_score,
         policy_mode: input.policy_mode,
         policy_trigger: input.policy_trigger,
         bid: input.quote.bid,
@@ -1137,6 +1293,24 @@ fn policy_mode_name(mode: PaperPolicyMode) -> &'static str {
     }
 }
 
+fn policy_agent_name(agent: PolicyAgentKind) -> &'static str {
+    match agent {
+        PolicyAgentKind::Static => "static",
+        PolicyAgentKind::Adaptive => "adaptive",
+        PolicyAgentKind::Hybrid => "hybrid",
+        PolicyAgentKind::Selector => "selector",
+        PolicyAgentKind::LearnedSelector => "learned_selector",
+    }
+}
+
+fn policy_action_name(action: PolicyAction) -> &'static str {
+    match action {
+        PolicyAction::Static => "static",
+        PolicyAction::Adaptive => "adaptive",
+        PolicyAction::Selector => "selector",
+    }
+}
+
 fn policy_trigger_name(trigger: PaperPolicyTrigger) -> &'static str {
     match trigger {
         PaperPolicyTrigger::None => "none",
@@ -1192,6 +1366,14 @@ mod tests {
             observed_quote,
             estimated_volatility,
             current_drawdown,
+            observation: AgentObservation {
+                estimated_volatility,
+                observed_spread: observed_quote.map(|quote| quote.spread()).unwrap_or(0.0),
+                max_observed_spread: observed_quote.map(|quote| quote.spread()).unwrap_or(0.0),
+                abs_mid_move: 0.0,
+                abs_inventory: state.inventory.abs(),
+                drawdown: current_drawdown,
+            },
         }
     }
 
@@ -1215,6 +1397,9 @@ mod tests {
 
         assert_eq!(result.rows.len(), 2);
         assert_eq!(result.rows[0].agent_mode, ControllerMode::FixedSpread);
+        assert_eq!(result.rows[0].policy_agent, PolicyAgentKind::Static);
+        assert_eq!(result.rows[0].policy_action, PolicyAction::Static);
+        assert_eq!(result.rows[0].policy_score, None);
         assert_eq!(result.rows[0].policy_mode, PaperPolicyMode::Static);
         assert_eq!(result.rows[0].policy_trigger, PaperPolicyTrigger::None);
         assert_eq!(result.rows[0].observed_bid, Some(99.95));
@@ -1503,6 +1688,9 @@ mod tests {
 
         assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
         assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);
+        assert_eq!(decision.agent.agent, PolicyAgentKind::Selector);
+        assert_eq!(decision.agent.action, PolicyAction::Adaptive);
+        assert!(decision.agent.score.unwrap_or_default() >= 0.10);
         assert!((decision.quote.spread() - 0.11).abs() < 1e-12);
     }
 
@@ -1579,6 +1767,9 @@ mod tests {
 
         assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
         assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);
+        assert_eq!(decision.agent.agent, PolicyAgentKind::LearnedSelector);
+        assert_eq!(decision.agent.action, PolicyAction::Selector);
+        assert!(decision.agent.score.unwrap_or_default() >= 0.0);
     }
 
     #[test]

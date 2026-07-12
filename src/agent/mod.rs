@@ -23,6 +23,56 @@ pub trait MarketMakingAgent {
     fn decide(&self, state: &SystemState, context: &StrategyContext) -> AgentDecision;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PolicyAgentKind {
+    Static,
+    Adaptive,
+    Hybrid,
+    Selector,
+    LearnedSelector,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PolicyAction {
+    Static,
+    Adaptive,
+    Selector,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PolicyReason {
+    None,
+    Configured,
+    Inventory,
+    Drawdown,
+    Volatility,
+    Spread,
+    Multiple,
+    ModelScore,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AgentObservation {
+    pub estimated_volatility: f64,
+    pub observed_spread: f64,
+    pub max_observed_spread: f64,
+    pub abs_mid_move: f64,
+    pub abs_inventory: f64,
+    pub drawdown: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PolicyAgentDecision {
+    pub agent: PolicyAgentKind,
+    pub action: PolicyAction,
+    pub reason: PolicyReason,
+    pub score: Option<f64>,
+}
+
+pub trait PolicyAgent {
+    fn decide(&self, observation: AgentObservation) -> PolicyAgentDecision;
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RuleBasedControllerParams {
     pub fixed_spread: StrategyParams,
