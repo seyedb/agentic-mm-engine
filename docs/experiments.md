@@ -14,10 +14,10 @@ cargo run -- configs/*.json
 
 The default config is `configs/baseline_sweep.json`. Use `configs/mixed_regime_adaptive_sweep.json` as the main research run, and `configs/*.json` when you want the full comparison set. Replay CSVs require `timestamp_ms` and `mid_price`; `bid` and `ask` are optional.
 
-Recent public Kraken OHLC data can be fetched into the same replay format:
+Older public Kraken OHLC replay helpers are preserved in `research/archive/`:
 
 ```bash
-python3 research/fetch_public_events.py --pair SOLUSD --bars 120 --out data/kraken_solusd_events.csv
+python3 research/archive/fetch_public_events.py --pair SOLUSD --bars 120 --out data/kraken_solusd_events.csv
 cargo run -- replay data/kraken_solusd_events.csv --spread 0.5 --skew 0.05 --quantity 0.1 --fee-rate 0.001
 cargo run -- replay-sweep data/kraken_solusd_events.csv --seeds 42,43,44,45,46 --spreads 0.2,0.5,1.0 --skews 0.0,0.02,0.05 --quantities 0.05,0.1,0.2 --fee-rate 0.001
 ```
@@ -73,11 +73,11 @@ Replay sweep rows are averaged across the configured seeds and ranked by stabili
 
 Multi-seed outputs include standard deviation fields such as `score_std`, `final_pnl_std`, and `max_drawdown_std`, plus average regime step counts and execution attribution for low, normal, and high volatility. Step datasets include quote state, inventory, PnL, fills, fees, and adverse selection for ML/calibration work.
 
-Use `research/analyze_steps.py <path>` when you want a detailed look at one exported step dataset.
+Use `research/archive/analyze_steps.py <path>` when you want a detailed look at one exported step dataset.
 
-Use `research/analyze_replay_sweep.py <path>` to summarize replay sweep sensitivity by spread, quantity, and skew.
+Use `research/archive/analyze_replay_sweep.py <path>` to summarize replay sweep sensitivity by spread, quantity, and skew.
 
-Use `research/compare_replay_sweeps.py <paths>` to compare best replay parameters across datasets.
+Use `research/archive/compare_replay_sweeps.py <paths>` to compare best replay parameters across datasets.
 It writes `target/research/replay_sweep_best.csv` and `target/research/replay_sweep_parameters.csv`.
 
 For paper-policy, selector, and learned-agent experiments, use the shorter workflow in [workflow.md](workflow.md).

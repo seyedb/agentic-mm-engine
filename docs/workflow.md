@@ -20,11 +20,10 @@ This writes a quote CSV and metadata file under `data/quotes/`. With `--evaluate
 
 The repository includes a small checked-in SOLUSD quote dataset bundle for reproducing the current report. Treat new captures as research inputs: review them before committing and keep the checked-in set small.
 
-Use the lighter fetchers when you only need raw replay inputs:
+Use the lighter quote fetcher when you only need a raw top-of-book replay input:
 
 ```bash
 python3 research/fetch_public_quotes.py --pair SOLUSD --samples 60 --out data/kraken_solusd_quotes.csv
-python3 research/fetch_public_events.py --pair SOLUSD --bars 120 --out data/kraken_solusd_events.csv
 ```
 
 ## Run Paper Sessions
@@ -84,12 +83,6 @@ target/research/live_dataset_manifest.csv
 target/research/live_dataset_evaluation.md
 ```
 
-Sweep selector weights when tuning the rule-based agentic controller:
-
-```bash
-python3 research/sweep_selector_policy.py
-```
-
 Train the first learned policy gate after the policy gate has produced window results:
 
 ```bash
@@ -106,12 +99,6 @@ Train the executable contextual-bandit policy agent:
 
 ```bash
 python3 research/train_contextual_bandit_agent.py
-```
-
-Run the offline contextual-bandit research diagnostic:
-
-```bash
-python3 research/train_bandit_selector.py
 ```
 
 Then rerun the gate so Rust loads the Python-trained model and evaluates it as a normal paper policy:
@@ -150,20 +137,9 @@ Use the longer learned-selector config when checking whether the live-paper beha
 ```bash
 python3 research/run_paper_live_report.py configs/runs/kraken_solusd_learned_selector_maker_fee_paper_live_long.json \
   --run-id solusd_long_001
-python3 research/compare_paper_live_runs.py
 ```
 
 See [live_demo.md](live_demo.md) for the latest learned-selector live-paper demonstration.
-
-Optional live-run comparison/calibration helpers:
-
-```bash
-python3 research/compare_paper_live_runs.py
-python3 research/calibrate_paper_fill_model.py target/reports/paper_live/solusd_001.csv
-python3 research/propose_paper_fill_config.py target/research/solusd_001_paper_fill_calibration.csv
-python3 research/compare_paper_fill_calibrations.py
-python3 research/summarize_paper_live_research.py
-```
 
 ## Replay And Strategy Baselines
 
@@ -171,8 +147,6 @@ Replay sweeps are still useful for checking the simulator and comparing baseline
 
 ```bash
 cargo run -- run configs/runs/sample_replay_sweep.json
-python3 research/run_replay_sweeps.py data/kraken_solusd_*.csv
-python3 research/analyze_replay_sweep.py target/reports/kraken_solusd_events_replay_sweep.csv
-python3 research/compare_replay_sweeps.py target/reports/*_replay_sweep.csv
-python3 research/compare_strategy_sweeps.py
 ```
+
+Older replay, calibration, and selector-tuning helpers are preserved under `research/archive/`.

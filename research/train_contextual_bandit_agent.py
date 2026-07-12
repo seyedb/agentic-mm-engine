@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from train_bandit_selector import (
+from archive.train_bandit_selector import (
     LinUcbArm,
     baseline_utility,
     chronological_examples,

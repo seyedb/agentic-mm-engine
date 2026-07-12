@@ -120,7 +120,7 @@ The `linear_agent` policy is a larger agentic step. Python fits one ridge linear
 
 The `bandit_agent` policy is the first contextual-bandit proof of concept. Python trains a LinUCB-style arm model from paper-session windows, exports per-action reward weights and uncertainty matrices, and Rust loads that model to choose a policy action at runtime. It demonstrates the ML-agent loop, but current gate results are mixed, so it should be treated as experimental rather than a better market maker.
 
-An older offline LinUCB diagnostic remains available in `research/train_bandit_selector.py` for quick research checks. The executable Rust path uses `research/train_contextual_bandit_agent.py`.
+An older offline LinUCB diagnostic remains available in `research/archive/train_bandit_selector.py` for quick research checks. The executable Rust path uses `research/train_contextual_bandit_agent.py`.
 
 ## Fills
 

@@ -13,10 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import evaluate_paper_policies
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_METADATA_PATTERN = "data/quotes/*.meta.json"
 DEFAULT_BASE_CONFIG = Path("configs/runs/kraken_solusd_selector_maker_fee_paper_session.json")
 DEFAULT_ADAPTIVE_CONFIG = Path("configs/runs/kraken_solusd_adaptive_maker_fee_paper_session.json")

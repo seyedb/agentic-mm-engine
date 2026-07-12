@@ -21,9 +21,9 @@ def parse_args() -> argparse.Namespace:
         help="Skip the expensive policy gate passes and regenerate learned/report artifacts only.",
     )
     parser.add_argument(
-        "--skip-bandit",
+        "--include-bandit-diagnostic",
         action="store_true",
-        help="Skip the offline LinUCB diagnostic.",
+        help="Also run the older offline LinUCB diagnostic.",
     )
     parser.add_argument(
         "--dry-run",
@@ -44,8 +44,10 @@ def pipeline_commands(args: argparse.Namespace) -> list[list[str]]:
     commands.append([sys.executable, str(RESEARCH_DIR / "train_contextual_bandit_agent.py")])
     if not args.skip_policy_gates:
         commands.append([sys.executable, str(RESEARCH_DIR / "policy_evaluation_gate.py")])
-    if not args.skip_bandit:
-        commands.append([sys.executable, str(RESEARCH_DIR / "train_bandit_selector.py")])
+    if args.include_bandit_diagnostic:
+        commands.append(
+            [sys.executable, str(RESEARCH_DIR / "archive" / "train_bandit_selector.py")]
+        )
     commands.append([sys.executable, str(RESEARCH_DIR / "summarize_live_dataset_evaluation.py")])
     commands.append([sys.executable, str(RESEARCH_DIR / "write_project_report.py")])
     return commands

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = Path("target/research/paper_config_comparison.csv")
 REQUIRED_COLUMNS = {
     "observed_bid",
