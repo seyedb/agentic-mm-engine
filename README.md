@@ -9,6 +9,24 @@ This is a learning and research project, not a production trading system. The cu
 
 The project now includes agentic proof-of-concept policies: Python trains small policy models from paper-session results, exports JSON models, and Rust executes those learned decisions during replay.
 
+### Agent Loop
+
+The project has a complete research loop for adding learned policy agents:
+
+```text
+public quote data
+  -> Rust paper execution and policy gate
+  -> CSV window outcomes
+  -> Python model training
+  -> JSON model artifact
+  -> Rust model loading and policy execution
+  -> reports and validation
+```
+
+Rust owns execution, accounting, fills, fees, inventory, and PnL. Python owns research workflows: data collection, model training, evaluation gates, and reports. JSON model files are the boundary between the two.
+
+Future ML agents can follow the same pattern: train from policy-gate window outcomes in Python, export a compact JSON model, add a Rust policy variant that validates and scores the model, then evaluate it through the same policy gate before treating it as useful.
+
 ### Requirements
 
 - Rust toolchain with Cargo.
