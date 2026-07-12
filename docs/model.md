@@ -114,7 +114,7 @@ Paper-session rows include `policy_mode` and `policy_trigger`, so reports can di
 
 The first ML-agent proof of concept is intentionally small. The Python research script `research/train_policy_selector.py` trains a logistic-regression classifier from paper-session window results. The model observes normalized market-state features and estimates whether the `selector` policy should beat the `adaptive` policy, then validates the choice by leaving one quote dataset out.
 
-This keeps model training outside the Rust accounting engine. Rust remains the deterministic simulator and paper-session runner; Python trains the policy-selection gate and writes a JSON model with coefficients, intercept, feature scales, and a probability threshold. The Rust `learned_selector` paper policy can then load that model and execute the learned gate during replay. A learned gate must beat simple baselines on held-out quote datasets before it should be treated as more than an experimental controller.
+This keeps model training outside the Rust accounting engine. Rust remains the deterministic simulator and paper-session runner; Python trains the logistic-regression policy gate and writes a JSON model with coefficients, intercept, feature scales, and a probability threshold. The Rust `learned_selector` paper policy can then load that model and execute the gate during replay. The learned selector must beat simple baselines on held-out quote datasets before it should be treated as more than an experimental controller.
 
 ## Fills
 

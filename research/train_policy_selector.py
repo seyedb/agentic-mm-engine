@@ -123,7 +123,7 @@ def parse_args() -> argparse.Namespace:
         "--feature-window",
         type=int,
         default=30,
-        help="Rolling feature window used by Rust when applying the learned gate.",
+        help="Rolling feature window used by Rust when applying the logistic-regression gate.",
     )
     parser.add_argument("--model-output", type=Path, default=DEFAULT_MODEL_OUTPUT)
     parser.add_argument("--folds-output", type=Path, default=DEFAULT_FOLDS_OUTPUT)

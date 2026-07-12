@@ -70,7 +70,7 @@ The result is useful because it is measurable and falsifiable, not because it pr
 
 - Public top-of-book snapshots are limited data.
 - Fill behavior is modeled, not exchange-verified.
-- The learned gate is small and trained on a limited number of quote windows.
+- The logistic-regression gate is small and trained on a limited number of quote windows.
 - Live paper mode polls public quotes and never places orders.
 
 ## Wrap-Up Assessment

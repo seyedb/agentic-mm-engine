@@ -24,7 +24,7 @@ Run the gate once to produce window-level policy outcomes:
 python3 research/policy_evaluation_gate.py
 ```
 
-Train the learned gate from those outcomes:
+Train the logistic-regression gate from those outcomes:
 
 ```bash
 python3 research/train_policy_selector.py
