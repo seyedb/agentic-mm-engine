@@ -1,0 +1,18 @@
+{
+  "csv_path": "/Users/hossein/Projects/mm_engine/data/quotes/solusd_policy_eval_120x3s_002.csv",
+  "ended_at": "2026-07-09T22:59:49.594634+00:00",
+  "evaluation": {
+    "aggregate_output": "/Users/hossein/Projects/mm_engine/target/research/quote_datasets/solusd_policy_eval_120x3s_002/current_policy/paper_policy_evaluation.csv",
+    "runs_output": "/Users/hossein/Projects/mm_engine/target/research/quote_datasets/solusd_policy_eval_120x3s_002/current_policy/paper_policy_window_runs.csv",
+    "work_dir": "/Users/hossein/Projects/mm_engine/target/research/quote_datasets/solusd_policy_eval_120x3s_002/current_policy/paper_policy_windows"
+  },
+  "evaluation_updated_at": "2026-07-09T23:05:18.391453+00:00",
+  "interval_seconds": 3.0,
+  "pair": "SOLUSD",
+  "run_id": "solusd_policy_eval_120x3s_002",
+  "run_type": "quote_dataset",
+  "samples": 120,
+  "schema_version": 1,
+  "started_at": "2026-07-09T22:53:35.315816+00:00",
+  "timeout": 10.0
+}

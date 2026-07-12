@@ -16,6 +16,7 @@ The project now includes an agentic proof of concept: Python trains a small logi
 - Models fills, fees, inventory, cash, mark-to-market PnL, and drawdown.
 - Trains a small Python logistic-regression gate and exports it back to Rust.
 - Evaluates policy robustness across multiple fill assumptions.
+- Includes small checked-in public quote datasets for reproducing the current report.
 
 ### Quickstart
 
@@ -29,6 +30,8 @@ For quick report regeneration from existing policy-gate outputs:
 python3 research/run_research_pipeline.py --skip-policy-gates
 ```
 
+The checked-in SOLUSD quote captures are enough to reproduce the current offline report. Collecting fresh public data is optional.
+
 Run the learned selector against live public quotes in paper mode:
 
 ```bash
@@ -40,6 +43,8 @@ python3 research/run_paper_live_report.py configs/runs/kraken_solusd_learned_sel
 
 Latest seven-dataset research report:
 
+- Public quote samples: `1440`
+- Replay windows: `48`
 - `learned_selector` configured utility: `0.000572`
 - `selector` configured utility: `0.000521`
 - `adaptive` configured utility: `0.000177`

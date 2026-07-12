@@ -18,6 +18,8 @@ python3 research/collect_quote_dataset.py \
 
 This writes a quote CSV and metadata file under `data/quotes/`. With `--evaluate`, it also writes dataset-specific paper-policy evaluations under `target/research/quote_datasets/`.
 
+The repository includes a small checked-in SOLUSD quote dataset bundle for reproducing the current report. Treat new captures as research inputs: review them before committing and keep the checked-in set small.
+
 Use the lighter fetchers when you only need raw replay inputs:
 
 ```bash
