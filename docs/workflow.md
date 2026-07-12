@@ -69,6 +69,12 @@ Train the first learned policy gate after the policy gate has produced window re
 python3 research/train_policy_selector.py
 ```
 
+Run the offline contextual-bandit research diagnostic:
+
+```bash
+python3 research/train_bandit_selector.py
+```
+
 Then rerun the gate so Rust loads the Python-trained model and evaluates it as a normal paper policy:
 
 ```bash
