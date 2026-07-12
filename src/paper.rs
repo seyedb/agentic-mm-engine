@@ -95,6 +95,12 @@ pub enum PaperPolicyConfig {
         adaptive_policy: PaperAdaptivePolicyConfig,
         selector_policy: PaperSelectorPolicyConfig,
     },
+    #[serde(rename = "bandit_agent")]
+    BanditAgent {
+        model_path: String,
+        adaptive_policy: PaperAdaptivePolicyConfig,
+        selector_policy: PaperSelectorPolicyConfig,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -212,6 +218,7 @@ pub struct PaperSessionRunner {
     volatility: RollingVolatility,
     learned_model: Option<LearnedPolicyModel>,
     linear_model: Option<LinearPolicyModel>,
+    bandit_model: Option<BanditPolicyModel>,
     learned_features: RollingLearnedFeatures,
     peak_pnl: f64,
     rng: StdRng,
@@ -221,16 +228,19 @@ impl PaperSessionRunner {
     pub fn new(config: PaperSessionConfig) -> Self {
         let learned_model = load_learned_policy_model(&config.policy);
         let linear_model = load_linear_policy_model(&config.policy);
+        let bandit_model = load_bandit_policy_model(&config.policy);
         let learned_window = learned_model
             .as_ref()
             .and_then(|model| model.feature_window)
             .or_else(|| linear_model.as_ref().and_then(|model| model.feature_window))
+            .or_else(|| bandit_model.as_ref().and_then(|model| model.feature_window))
             .unwrap_or(30);
         Self {
             volatility: RollingVolatility::new(config.volatility_window),
             learned_features: RollingLearnedFeatures::new(learned_window),
             learned_model,
             linear_model,
+            bandit_model,
             rng: StdRng::seed_from_u64(config.seed),
             config,
             state: None,
@@ -297,6 +307,7 @@ impl PaperSessionRunner {
             &self.config.policy,
             self.learned_model.as_ref(),
             self.linear_model.as_ref(),
+            self.bandit_model.as_ref(),
             learned_features,
         );
         let quote = fee_aware_quote(
@@ -351,6 +362,7 @@ fn apply_paper_policy(
     policy: &PaperPolicyConfig,
     learned_model: Option<&LearnedPolicyModel>,
     linear_model: Option<&LinearPolicyModel>,
+    bandit_model: Option<&BanditPolicyModel>,
     learned_features: Option<LearnedFeatureSnapshot>,
 ) -> PaperPolicyDecision {
     match policy.clone() {
@@ -504,6 +516,17 @@ fn apply_paper_policy(
             linear_model.expect("linear agent model should be loaded before paper session"),
             learned_features.expect("linear agent features should be available"),
         ),
+        PaperPolicyConfig::BanditAgent {
+            model_path: _,
+            adaptive_policy,
+            selector_policy,
+        } => bandit_agent_policy_decision(
+            input,
+            adaptive_policy,
+            selector_policy,
+            bandit_model.expect("bandit agent model should be loaded before paper session"),
+            learned_features.expect("bandit agent features should be available"),
+        ),
     }
 }
 
@@ -645,6 +668,30 @@ impl PolicyAgent for LinearPolicyAgent<'_> {
     }
 }
 
+struct BanditPolicyAgent<'a> {
+    model: &'a BanditPolicyModel,
+}
+
+impl PolicyAgent for BanditPolicyAgent<'_> {
+    fn decide(&self, observation: AgentObservation) -> PolicyAgentDecision {
+        let features = LearnedFeatureSnapshot {
+            estimated_volatility: observation.estimated_volatility,
+            observed_spread: observation.observed_spread,
+            max_observed_spread: observation.max_observed_spread,
+            abs_mid_move: observation.abs_mid_move,
+            abs_inventory: observation.abs_inventory,
+            drawdown: observation.drawdown,
+        };
+        let (action, score) = self.model.best_action(features);
+        PolicyAgentDecision {
+            agent: PolicyAgentKind::BanditAgent,
+            action: policy_action_from_model_action(action),
+            reason: PolicyReason::ModelScore,
+            score: Some(score),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct LearnedPolicyModel {
     action_on: String,
@@ -668,6 +715,32 @@ struct LinearPolicyModel {
     feature_scale: LearnedFeatureScale,
     #[serde(default)]
     feature_window: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BanditPolicyModel {
+    actions: Vec<String>,
+    alpha: f64,
+    theta: BTreeMap<String, LearnedFeatureWeights>,
+    inverse_covariance: BTreeMap<String, Vec<Vec<f64>>>,
+    feature_scale: LearnedFeatureScale,
+    #[serde(default)]
+    feature_window: Option<usize>,
+}
+
+impl BanditPolicyModel {
+    fn best_action(&self, features: LearnedFeatureSnapshot) -> (&str, f64) {
+        self.actions
+            .iter()
+            .map(|action| (action.as_str(), bandit_policy_score(self, action, features)))
+            .max_by(|left, right| {
+                left.1
+                    .partial_cmp(&right.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| left.0.cmp(right.0))
+            })
+            .expect("bandit policy model should have at least one action")
+    }
 }
 
 impl LinearPolicyModel {
@@ -866,6 +939,58 @@ fn linear_agent_policy_decision(
     }
 }
 
+fn bandit_agent_policy_decision(
+    input: PaperPolicyInput<'_>,
+    adaptive_config: PaperAdaptivePolicyConfig,
+    selector_config: PaperSelectorPolicyConfig,
+    model: &BanditPolicyModel,
+    features: LearnedFeatureSnapshot,
+) -> PaperPolicyDecision {
+    let agent = BanditPolicyAgent { model };
+    let agent_decision = agent.decide(AgentObservation {
+        estimated_volatility: features.estimated_volatility,
+        observed_spread: features.observed_spread,
+        max_observed_spread: features.max_observed_spread,
+        abs_mid_move: features.abs_mid_move,
+        abs_inventory: features.abs_inventory,
+        drawdown: features.drawdown,
+    });
+
+    match agent_decision.action {
+        PolicyAction::Static => PaperPolicyDecision {
+            quote: input.quote,
+            mode: PaperPolicyMode::Static,
+            trigger: PaperPolicyTrigger::None,
+            agent: agent_decision,
+        },
+        PolicyAction::Adaptive => PaperPolicyDecision {
+            quote: adaptive_quote(
+                input.quote,
+                input.state,
+                input.observed_quote,
+                input.estimated_volatility,
+                adaptive_config.into(),
+            ),
+            mode: PaperPolicyMode::Adaptive,
+            trigger: PaperPolicyTrigger::Configured,
+            agent: agent_decision,
+        },
+        PolicyAction::Selector => {
+            let mut selector_decision = selector_policy_decision(
+                input.quote,
+                input.state,
+                input.observed_quote,
+                input.estimated_volatility,
+                input.observation,
+                adaptive_config.into(),
+                selector_config.into(),
+            );
+            selector_decision.agent = agent_decision;
+            selector_decision
+        }
+    }
+}
+
 fn policy_action_from_model_action(action: &str) -> PolicyAction {
     match action {
         "static" => PolicyAction::Static,
@@ -926,6 +1051,57 @@ fn linear_policy_score(
         + normalized_feature(features.drawdown, model.feature_scale.drawdown) * weights.drawdown
 }
 
+fn bandit_policy_score(
+    model: &BanditPolicyModel,
+    action: &str,
+    features: LearnedFeatureSnapshot,
+) -> f64 {
+    let weights = model
+        .theta
+        .get(action)
+        .unwrap_or_else(|| panic!("bandit agent model missing theta for action {action:?}"));
+    let vector = normalized_feature_vector(features, model.feature_scale);
+    let exploit = weights.estimated_volatility * vector[0]
+        + weights.observed_spread * vector[1]
+        + weights.max_observed_spread * vector[2]
+        + weights.abs_mid_move * vector[3]
+        + weights.abs_inventory * vector[4]
+        + weights.drawdown * vector[5];
+    let inverse = model.inverse_covariance.get(action).unwrap_or_else(|| {
+        panic!("bandit agent model missing inverse covariance for action {action:?}")
+    });
+    let uncertainty = quadratic_form(&vector, inverse).max(0.0).sqrt();
+    exploit + model.alpha * uncertainty
+}
+
+fn normalized_feature_vector(
+    features: LearnedFeatureSnapshot,
+    scale: LearnedFeatureScale,
+) -> [f64; 6] {
+    [
+        normalized_feature(features.estimated_volatility, scale.estimated_volatility),
+        normalized_feature(features.observed_spread, scale.observed_spread),
+        normalized_feature(features.max_observed_spread, scale.max_observed_spread),
+        normalized_feature(features.abs_mid_move, scale.abs_mid_move),
+        normalized_feature(features.abs_inventory, scale.abs_inventory),
+        normalized_feature(features.drawdown, scale.drawdown),
+    ]
+}
+
+fn quadratic_form(vector: &[f64; 6], matrix: &[Vec<f64>]) -> f64 {
+    vector
+        .iter()
+        .enumerate()
+        .map(|(row, left)| {
+            left * vector
+                .iter()
+                .enumerate()
+                .map(|(col, right)| matrix[row][col] * right)
+                .sum::<f64>()
+        })
+        .sum()
+}
+
 fn normalized_feature(value: f64, scale: f64) -> f64 {
     if scale <= 0.0 { 0.0 } else { value / scale }
 }
@@ -953,6 +1129,18 @@ fn load_linear_policy_model(policy: &PaperPolicyConfig) -> Option<LinearPolicyMo
     let model: LinearPolicyModel = serde_json::from_str(&payload)
         .unwrap_or_else(|error| panic!("failed to parse linear agent model {model_path}: {error}"));
     validate_linear_policy_model(model_path, &model);
+    Some(model)
+}
+
+fn load_bandit_policy_model(policy: &PaperPolicyConfig) -> Option<BanditPolicyModel> {
+    let PaperPolicyConfig::BanditAgent { model_path, .. } = policy else {
+        return None;
+    };
+    let payload = fs::read_to_string(model_path)
+        .unwrap_or_else(|error| panic!("failed to read bandit agent model {model_path}: {error}"));
+    let model: BanditPolicyModel = serde_json::from_str(&payload)
+        .unwrap_or_else(|error| panic!("failed to parse bandit agent model {model_path}: {error}"));
+    validate_bandit_policy_model(model_path, &model);
     Some(model)
 }
 
@@ -992,6 +1180,32 @@ fn validate_linear_policy_model(path: &str, model: &LinearPolicyModel) {
             && !intercept.is_finite()
         {
             panic!("linear agent model {path} has non-finite intercept for action {action:?}");
+        }
+    }
+}
+
+fn validate_bandit_policy_model(path: &str, model: &BanditPolicyModel) {
+    if model.actions.is_empty() {
+        panic!("bandit agent model {path} has no actions");
+    }
+    if !model.alpha.is_finite() || model.alpha < 0.0 {
+        panic!("bandit agent model {path} has invalid alpha");
+    }
+    for action in &model.actions {
+        match action.as_str() {
+            "static" | "adaptive" | "selector" => {}
+            other => panic!("bandit agent model {path} has unsupported action {other:?}"),
+        }
+        if !model.theta.contains_key(action) {
+            panic!("bandit agent model {path} missing theta for action {action:?}");
+        }
+        let Some(inverse) = model.inverse_covariance.get(action) else {
+            panic!("bandit agent model {path} missing inverse covariance for action {action:?}");
+        };
+        if inverse.len() != 6 || inverse.iter().any(|row| row.len() != 6) {
+            panic!(
+                "bandit agent model {path} has invalid inverse covariance for action {action:?}"
+            );
         }
     }
 }
@@ -1487,6 +1701,7 @@ fn policy_agent_name(agent: PolicyAgentKind) -> &'static str {
         PolicyAgentKind::Selector => "selector",
         PolicyAgentKind::LearnedSelector => "learned_selector",
         PolicyAgentKind::LinearAgent => "linear_agent",
+        PolicyAgentKind::BanditAgent => "bandit_agent",
     }
 }
 
@@ -1692,6 +1907,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
 
         assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
@@ -1721,6 +1937,7 @@ mod tests {
                 inventory_skew_multiplier: 0.10,
                 touch_spread_multiplier: 0.0,
             },
+            None,
             None,
             None,
             None,
@@ -1761,6 +1978,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
 
         assert_eq!(decision.quote, input);
@@ -1795,6 +2013,7 @@ mod tests {
                 inventory_threshold: 10.0,
                 volatility_threshold: 0.01,
             },
+            None,
             None,
             None,
             None,
@@ -1838,6 +2057,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
 
         assert_eq!(decision.quote, input);
@@ -1874,6 +2094,7 @@ mod tests {
                 drawdown_weight: 0.0,
                 activation_threshold: 0.10,
             },
+            None,
             None,
             None,
             None,
@@ -2069,6 +2290,125 @@ mod tests {
         );
 
         assert_eq!(decision.agent.agent, PolicyAgentKind::LinearAgent);
+        assert_eq!(decision.agent.action, PolicyAction::Selector);
+        assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
+        assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);
+        assert!(decision.agent.score.unwrap_or_default() > 1.0);
+    }
+
+    #[test]
+    fn bandit_agent_uses_ucb_score_to_choose_action() {
+        let state = SystemState::new(100.0);
+        let identity = vec![
+            vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+        ];
+        let model = BanditPolicyModel {
+            actions: vec![
+                "static".to_string(),
+                "adaptive".to_string(),
+                "selector".to_string(),
+            ],
+            alpha: 0.0,
+            theta: BTreeMap::from([
+                (
+                    "static".to_string(),
+                    LearnedFeatureWeights {
+                        estimated_volatility: 0.0,
+                        observed_spread: 0.0,
+                        max_observed_spread: 0.0,
+                        abs_mid_move: 0.0,
+                        abs_inventory: 0.0,
+                        drawdown: 0.0,
+                    },
+                ),
+                (
+                    "adaptive".to_string(),
+                    LearnedFeatureWeights {
+                        estimated_volatility: 0.0,
+                        observed_spread: 0.0,
+                        max_observed_spread: 0.0,
+                        abs_mid_move: 0.0,
+                        abs_inventory: 0.0,
+                        drawdown: 0.0,
+                    },
+                ),
+                (
+                    "selector".to_string(),
+                    LearnedFeatureWeights {
+                        estimated_volatility: 0.0,
+                        observed_spread: 0.0,
+                        max_observed_spread: 0.0,
+                        abs_mid_move: 0.0,
+                        abs_inventory: 2.0,
+                        drawdown: 0.0,
+                    },
+                ),
+            ]),
+            inverse_covariance: BTreeMap::from([
+                ("static".to_string(), identity.clone()),
+                ("adaptive".to_string(), identity.clone()),
+                ("selector".to_string(), identity),
+            ]),
+            feature_scale: LearnedFeatureScale {
+                estimated_volatility: 1.0,
+                observed_spread: 1.0,
+                max_observed_spread: 1.0,
+                abs_mid_move: 1.0,
+                abs_inventory: 1.0,
+                drawdown: 1.0,
+            },
+            feature_window: Some(30),
+        };
+        let decision = bandit_agent_policy_decision(
+            paper_policy_input(
+                Quote {
+                    bid: 99.99,
+                    ask: 100.01,
+                },
+                &state,
+                Some(Quote {
+                    bid: 99.90,
+                    ask: 100.10,
+                }),
+                0.01,
+                0.0,
+            ),
+            PaperAdaptivePolicyConfig {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+            },
+            PaperSelectorPolicyConfig {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+                volatility_weight: 20.0,
+                spread_weight: 1.0,
+                inventory_weight: 0.0,
+                drawdown_weight: 0.0,
+                activation_threshold: 0.10,
+            },
+            &model,
+            LearnedFeatureSnapshot {
+                estimated_volatility: 0.0,
+                observed_spread: 0.0,
+                max_observed_spread: 0.0,
+                abs_mid_move: 0.0,
+                abs_inventory: 1.0,
+                drawdown: 0.0,
+            },
+        );
+
+        assert_eq!(decision.agent.agent, PolicyAgentKind::BanditAgent);
         assert_eq!(decision.agent.action, PolicyAction::Selector);
         assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
         assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);

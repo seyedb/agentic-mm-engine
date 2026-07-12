@@ -31,6 +31,7 @@ pub enum PolicyAgentKind {
     Selector,
     LearnedSelector,
     LinearAgent,
+    BanditAgent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

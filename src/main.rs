@@ -696,6 +696,11 @@ fn validate_paper_policy(policy: &PaperPolicyConfig) -> Result<(), String> {
             model_path,
             adaptive_policy,
             selector_policy,
+        }
+        | PaperPolicyConfig::BanditAgent {
+            model_path,
+            adaptive_policy,
+            selector_policy,
         } => {
             if model_path.trim().is_empty() {
                 return Err("policy.model_path must not be empty".to_string());

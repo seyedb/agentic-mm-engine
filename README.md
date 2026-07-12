@@ -7,7 +7,7 @@ A Rust-based experimental market-making research engine for studying inventory-a
 
 This is a learning and research project, not a production trading system. The current focus is a clean Rust paper engine with a reproducible Python research loop.
 
-The project now includes an agentic proof of concept: Python trains a small logistic-regression policy selector from paper-session results, exports a JSON model, and Rust executes that learned policy during replay.
+The project now includes agentic proof-of-concept policies: Python trains small policy models from paper-session results, exports JSON models, and Rust executes those learned decisions during replay.
 
 ### What It Does
 
@@ -16,6 +16,7 @@ The project now includes an agentic proof of concept: Python trains a small logi
 - Models fills, fees, inventory, cash, mark-to-market PnL, and drawdown.
 - Trains a small Python logistic-regression gate and exports it back to Rust.
 - Trains a multi-action linear policy agent and exports it back to Rust.
+- Trains an executable LinUCB contextual-bandit agent and exports it back to Rust.
 - Evaluates policy robustness across multiple fill assumptions.
 - Includes small checked-in public quote datasets for reproducing the current report.
 
@@ -51,6 +52,7 @@ Latest seven-dataset research report:
 - `adaptive` configured utility: `0.000177`
 - `linear_agent` liquid-fill utility: `0.004511`
 - `linear_agent` is functional but mixed: it wins liquid-fill sensitivity and lags configured/conservative assumptions.
+- `bandit_agent` is executable now, but remains research-only: configured utility `-0.003747`.
 
 This is a small-sample research result, not evidence of a live trading edge.
 
@@ -89,5 +91,5 @@ This project is developed as a learning and research effort with AI assistance f
 ### Roadmap
 
 - Preserve the final research result bundle.
-- Improve the contextual-bandit selector only if offline out-of-sample tests beat simpler selectors.
+- Improve the contextual-bandit agent only if more data shows it can beat simpler selectors.
 - Keep improving the learned policy only when new data exposes a concrete weakness.

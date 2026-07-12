@@ -13,6 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POLICY_SUMMARY = Path("target/research/policy_gate_policy_summary.csv")
 DEFAULT_SELECTOR_SWEEP = Path("target/research/selector_policy_sweep.csv")
 DEFAULT_LEARNED_SELECTOR_FOLDS = Path("target/research/learned_policy_selector_folds.csv")
+DEFAULT_CONTEXTUAL_BANDIT_RUNS = Path("target/research/contextual_bandit_agent_runs.csv")
+DEFAULT_CONTEXTUAL_BANDIT_FOLDS = Path("target/research/contextual_bandit_agent_folds.csv")
 DEFAULT_LIVE_RUNS = Path("target/research/paper_live_runs.csv")
 DEFAULT_OUTPUT = Path("docs/final_report.md")
 
@@ -26,6 +28,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_LEARNED_SELECTOR_FOLDS,
     )
+    parser.add_argument("--bandit-runs", type=Path, default=DEFAULT_CONTEXTUAL_BANDIT_RUNS)
+    parser.add_argument("--bandit-folds", type=Path, default=DEFAULT_CONTEXTUAL_BANDIT_FOLDS)
     parser.add_argument("--live-runs", type=Path, default=DEFAULT_LIVE_RUNS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     return parser.parse_args()
@@ -87,6 +91,13 @@ def linear_agent_row(rows: list[dict[str, str]]) -> dict[str, str] | None:
     return None
 
 
+def bandit_agent_row(rows: list[dict[str, str]]) -> dict[str, str] | None:
+    for row in rows:
+        if row["assumption"] == "configured" and row["policy"] == "bandit_agent":
+            return row
+    return None
+
+
 def policy_row(
     rows: list[dict[str, str]], assumption: str, policy: str
 ) -> dict[str, str] | None:
@@ -140,6 +151,8 @@ def render_report(
     policy_rows: list[dict[str, str]],
     sweep_rows: list[dict[str, str]],
     learned_rows: list[dict[str, str]],
+    bandit_runs: list[dict[str, str]],
+    bandit_folds: list[dict[str, str]],
     live_rows: list[dict[str, str]],
 ) -> str:
     best_policy = best_configured_policy(policy_rows)
@@ -147,6 +160,7 @@ def render_report(
     adaptive = adaptive_row(policy_rows)
     learned_selector = learned_selector_row(policy_rows)
     linear_agent = linear_agent_row(policy_rows)
+    bandit_agent = bandit_agent_row(policy_rows)
     conservative_best = best_assumption_policy(policy_rows, "conservative_fill")
     liquid_best = best_assumption_policy(policy_rows, "liquid_fill")
     conservative_learned = policy_row(policy_rows, "conservative_fill", "learned_selector")
@@ -168,6 +182,7 @@ def render_report(
         "- Policies include static, adaptive, hybrid, selector, learned-selector, and linear-agent variants.",
         "- The learned selector is a logistic-regression classifier trained in Python, exported as JSON, and loaded back into Rust for paper execution.",
         "- The linear agent is a multi-action ridge-regression utility model trained in Python and executed by Rust.",
+        "- The bandit agent is a LinUCB contextual-bandit policy trained in Python and executed by Rust.",
         "",
         "## Research Result",
         "",
@@ -215,6 +230,18 @@ def render_report(
                 f"- Rust linear-agent adaptive-step rate: `{fmt(linear_agent['adaptive_step_pct'])}%`.",
             ]
         )
+    if bandit_agent and adaptive and selector:
+        rust_bandit = parse_float(bandit_agent, "mean_utility")
+        rust_adaptive = parse_float(adaptive, "mean_utility")
+        rust_selector = parse_float(selector, "mean_utility")
+        lines.extend(
+            [
+                f"- Rust bandit-agent utility: `{rust_bandit:.6f}`.",
+                f"- Rust bandit-agent minus adaptive: `{rust_bandit - rust_adaptive:.6f}`.",
+                f"- Rust bandit-agent minus selector: `{rust_bandit - rust_selector:.6f}`.",
+                f"- Rust bandit-agent adaptive-step rate: `{fmt(bandit_agent['adaptive_step_pct'])}%`.",
+            ]
+        )
     lines.extend(
         [
             "",
@@ -260,11 +287,25 @@ def render_report(
             "",
             "## Contextual Bandit Check",
             "",
-            "- An offline LinUCB selector was tested as a phase-2 research diagnostic.",
-            "- Chronological LinUCB utility: `0.000978` versus always-adaptive `0.000544`.",
-            "- Leave-one-dataset-out LinUCB utility: `0.000169` versus logistic learned-selector `0.000573`.",
-            "- This is a negative out-of-sample result, so the bandit remains research-only.",
         ]
+    )
+    if bandit_runs:
+        chronological_bandit = mean_column(bandit_runs, "reward")
+        lines.append(f"- Chronological executable LinUCB utility: `{chronological_bandit:.6f}`.")
+    if bandit_folds:
+        fold_bandit = mean_column(bandit_folds, "bandit_utility")
+        lines.append(f"- Leave-one-dataset-out LinUCB utility: `{fold_bandit:.6f}`.")
+        for action in ["static", "adaptive", "selector"]:
+            column = f"{action}_utility"
+            if column in bandit_folds[0]:
+                utility = mean_column(bandit_folds, column)
+                lines.append(f"- Fold always-`{action}` utility: `{utility:.6f}`.")
+    if bandit_agent and adaptive and selector:
+        lines.append(
+            f"- Rust policy-gate bandit utility: `{fmt(bandit_agent['mean_utility'])}`."
+        )
+    lines.append(
+        "- The bandit is executable and useful as an ML-agent proof of concept, but it is not the best policy in the current gate."
     )
     if live_run:
         lines.extend(
@@ -289,9 +330,9 @@ def render_report(
             "",
             "## Interpretation",
             "",
-            "The project has reached a credible proof-of-concept state. The agentic loop is real: public data feeds Rust paper sessions, Python trains a small logistic-regression policy gate, the model is exported to JSON, and Rust executes that learned selector in replay and live public-data paper mode.",
+            "The project has reached a credible proof-of-concept state. The agentic loop is real: public data feeds Rust paper sessions, Python trains small logistic, linear, and contextual-bandit policy models, the models are exported to JSON, and Rust executes those learned decisions in replay.",
             "",
-            "The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, while the linear agent is a functional multi-action controller with mixed results: weak under configured and conservative fills, but strongest under the liquid-fill sensitivity. The weakest point remains fill realism.",
+            "The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, while the linear and bandit agents are functional multi-action controllers with mixed results. The weakest point remains fill realism.",
             "",
             "## Limitations",
             "",
@@ -302,7 +343,7 @@ def render_report(
             "",
             "## Wrap-Up Assessment",
             "",
-            "This is a reasonable place to wrap the current phase. The next genuinely interesting phase would be a small contextual-bandit or reinforcement-style selector, but that should be treated as a separate research extension after preserving this result.",
+            "This is a reasonable place to wrap the current phase. The next genuinely interesting phase would be more live public-data evaluation and a larger dataset before trying to improve the ML agents.",
             "",
         ]
     )
@@ -316,12 +357,25 @@ def main() -> int:
         policy_rows = read_csv(project_path(args.policy_summary))
         sweep_rows = read_csv(project_path(args.selector_sweep))
         learned_path = project_path(args.learned_selector_folds)
+        bandit_runs_path = project_path(args.bandit_runs)
+        bandit_folds_path = project_path(args.bandit_folds)
         live_path = project_path(args.live_runs)
         learned_rows = optional_csv(learned_path)
+        bandit_runs = optional_csv(bandit_runs_path)
+        bandit_folds = optional_csv(bandit_folds_path)
         live_rows = optional_csv(live_path)
         output = project_path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(render_report(policy_rows, sweep_rows, learned_rows, live_rows))
+        output.write_text(
+            render_report(
+                policy_rows,
+                sweep_rows,
+                learned_rows,
+                bandit_runs,
+                bandit_folds,
+                live_rows,
+            )
+        )
     except (OSError, ValueError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

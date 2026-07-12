@@ -41,6 +41,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[list[str]]:
     if not args.skip_policy_gates:
         commands.append([sys.executable, str(RESEARCH_DIR / "policy_evaluation_gate.py")])
     commands.append([sys.executable, str(RESEARCH_DIR / "train_linear_policy_agent.py")])
+    commands.append([sys.executable, str(RESEARCH_DIR / "train_contextual_bandit_agent.py")])
     if not args.skip_policy_gates:
         commands.append([sys.executable, str(RESEARCH_DIR / "policy_evaluation_gate.py")])
     if not args.skip_bandit:

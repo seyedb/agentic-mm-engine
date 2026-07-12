@@ -102,6 +102,12 @@ Train the multi-action linear policy agent:
 python3 research/train_linear_policy_agent.py
 ```
 
+Train the executable contextual-bandit policy agent:
+
+```bash
+python3 research/train_contextual_bandit_agent.py
+```
+
 Run the offline contextual-bandit research diagnostic:
 
 ```bash

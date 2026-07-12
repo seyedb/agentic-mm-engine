@@ -11,6 +11,7 @@ This is an experimental market-making research project, not a production trading
 - Policies include static, adaptive, hybrid, selector, learned-selector, and linear-agent variants.
 - The learned selector is a logistic-regression classifier trained in Python, exported as JSON, and loaded back into Rust for paper execution.
 - The linear agent is a multi-action ridge-regression utility model trained in Python and executed by Rust.
+- The bandit agent is a LinUCB contextual-bandit policy trained in Python and executed by Rust.
 
 ## Research Result
 
@@ -35,6 +36,10 @@ This is an experimental market-making research project, not a production trading
 - Rust linear-agent minus adaptive: `-0.001138`.
 - Rust linear-agent minus selector: `-0.001482`.
 - Rust linear-agent adaptive-step rate: `58.402778%`.
+- Rust bandit-agent utility: `-0.003747`.
+- Rust bandit-agent minus adaptive: `-0.003924`.
+- Rust bandit-agent minus selector: `-0.004268`.
+- Rust bandit-agent adaptive-step rate: `40.138889%`.
 
 ## Fill-Assumption Check
 
@@ -54,10 +59,13 @@ This is an experimental market-making research project, not a production trading
 
 ## Contextual Bandit Check
 
-- An offline LinUCB selector was tested as a phase-2 research diagnostic.
-- Chronological LinUCB utility: `0.000978` versus always-adaptive `0.000544`.
-- Leave-one-dataset-out LinUCB utility: `0.000169` versus logistic learned-selector `0.000573`.
-- This is a negative out-of-sample result, so the bandit remains research-only.
+- Chronological executable LinUCB utility: `-0.000844`.
+- Leave-one-dataset-out LinUCB utility: `0.001074`.
+- Fold always-`static` utility: `-0.004370`.
+- Fold always-`adaptive` utility: `0.000178`.
+- Fold always-`selector` utility: `0.000522`.
+- Rust policy-gate bandit utility: `-0.003747`.
+- The bandit is executable and useful as an ML-agent proof of concept, but it is not the best policy in the current gate.
 
 ## Live Paper Demo
 
@@ -74,9 +82,9 @@ This is an experimental market-making research project, not a production trading
 
 ## Interpretation
 
-The project has reached a credible proof-of-concept state. The agentic loop is real: public data feeds Rust paper sessions, Python trains a small logistic-regression policy gate, the model is exported to JSON, and Rust executes that learned selector in replay and live public-data paper mode.
+The project has reached a credible proof-of-concept state. The agentic loop is real: public data feeds Rust paper sessions, Python trains small logistic, linear, and contextual-bandit policy models, the models are exported to JSON, and Rust executes those learned decisions in replay.
 
-The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, while the linear agent is a functional multi-action controller with mixed results: weak under configured and conservative fills, but strongest under the liquid-fill sensitivity. The weakest point remains fill realism.
+The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, while the linear and bandit agents are functional multi-action controllers with mixed results. The weakest point remains fill realism.
 
 ## Limitations
 
@@ -87,4 +95,4 @@ The result is useful because it is measurable and falsifiable, not because it pr
 
 ## Wrap-Up Assessment
 
-This is a reasonable place to wrap the current phase. The next genuinely interesting phase would be a small contextual-bandit or reinforcement-style selector, but that should be treated as a separate research extension after preserving this result.
+This is a reasonable place to wrap the current phase. The next genuinely interesting phase would be more live public-data evaluation and a larger dataset before trying to improve the ML agents.

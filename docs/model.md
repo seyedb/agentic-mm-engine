@@ -118,7 +118,9 @@ This keeps model training outside the Rust accounting engine. Rust remains the d
 
 The `linear_agent` policy is a larger agentic step. Python fits one ridge linear utility model per action (`static`, `adaptive`, and `selector`), exports a multi-action JSON model, and Rust scores each action at runtime before executing the highest-scored action. It is still a research policy, but it establishes the interface needed for later contextual-bandit or reinforcement-style agents.
 
-An offline LinUCB contextual-bandit diagnostic is available in `research/train_bandit_selector.py`. It is currently a research check only: it beat always-adaptive in chronological replay but failed the leave-one-dataset-out check, so it is not wired into Rust paper/live execution.
+The `bandit_agent` policy is the first contextual-bandit proof of concept. Python trains a LinUCB-style arm model from paper-session windows, exports per-action reward weights and uncertainty matrices, and Rust loads that model to choose a policy action at runtime. It demonstrates the ML-agent loop, but current gate results are mixed, so it should be treated as experimental rather than a better market maker.
+
+An older offline LinUCB diagnostic remains available in `research/train_bandit_selector.py` for quick research checks. The executable Rust path uses `research/train_contextual_bandit_agent.py`.
 
 ## Fills
 
