@@ -21,6 +21,7 @@ from train_policy_selector import (
 
 DEFAULT_OUTPUT = Path("target/research/bandit_selector_runs.csv")
 DEFAULT_REPORT = Path("target/research/bandit_selector.md")
+DEFAULT_FOLDS_OUTPUT = Path("target/research/bandit_selector_folds.csv")
 
 
 @dataclass
@@ -38,6 +39,20 @@ class Decision:
     best_action: str
     best_reward: float
     regret: float
+
+
+@dataclass(frozen=True)
+class FoldResult:
+    holdout_run_id: str
+    windows: int
+    bandit_utility: float
+    adaptive_utility: float
+    selector_utility: float
+    learned_selector_utility: float
+    oracle_utility: float
+    regret: float
+    selector_actions: int
+    adaptive_actions: int
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +73,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ridge", type=float, default=1.0)
     parser.add_argument("--feature-policy", default="static")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--folds-output", type=Path, default=DEFAULT_FOLDS_OUTPUT)
     parser.add_argument("--report-output", type=Path, default=DEFAULT_REPORT)
     return parser.parse_args()
 
@@ -138,12 +154,16 @@ def best_action(example: Example, actions: list[str]) -> str:
     return max(actions, key=lambda action: example.utilities[action])
 
 
-def run_linucb(examples: list[Example], actions: list[str], alpha: float, ridge: float) -> list[Decision]:
+def fresh_arms(actions: list[str], ridge: float) -> dict[str, LinUcbArm]:
     size = len(FEATURES)
-    arms = {
+    return {
         action: LinUcbArm(identity(size, ridge), [0.0 for _feature in FEATURES])
         for action in actions
     }
+
+
+def run_linucb(examples: list[Example], actions: list[str], alpha: float, ridge: float) -> list[Decision]:
+    arms = fresh_arms(actions, ridge)
     decisions = []
 
     for index, example in enumerate(examples):
@@ -166,6 +186,75 @@ def run_linucb(examples: list[Example], actions: list[str], alpha: float, ridge:
         )
 
     return decisions
+
+
+def pretrain_arms(
+    examples: list[Example],
+    actions: list[str],
+    alpha: float,
+    ridge: float,
+) -> dict[str, LinUcbArm]:
+    arms = fresh_arms(actions, ridge)
+    for index, example in enumerate(examples):
+        features = feature_vector(example)
+        action = actions[index] if index < len(actions) else choose_action(arms, actions, features, alpha)
+        update_arm(arms[action], features, example.utilities[action])
+    return arms
+
+
+def evaluate_greedy(
+    examples: list[Example],
+    actions: list[str],
+    arms: dict[str, LinUcbArm],
+) -> list[Decision]:
+    decisions = []
+    for example in examples:
+        features = feature_vector(example)
+        action = choose_action(arms, actions, features, 0.0)
+        reward = example.utilities[action]
+        oracle = best_action(example, actions)
+        oracle_reward = example.utilities[oracle]
+        decisions.append(
+            Decision(
+                run_id=example.run_id,
+                window=example.window,
+                action=action,
+                reward=reward,
+                best_action=oracle,
+                best_reward=oracle_reward,
+                regret=oracle_reward - reward,
+            )
+        )
+    return decisions
+
+
+def leave_one_dataset_out(
+    examples: list[Example],
+    actions: list[str],
+    alpha: float,
+    ridge: float,
+) -> list[FoldResult]:
+    folds = []
+    for holdout in sorted({example.run_id for example in examples}):
+        train = [example for example in examples if example.run_id != holdout]
+        test = [example for example in examples if example.run_id == holdout]
+        arms = pretrain_arms(train, actions, alpha, ridge)
+        decisions = evaluate_greedy(test, actions, arms)
+        folds.append(
+            FoldResult(
+                holdout_run_id=holdout,
+                windows=len(test),
+                bandit_utility=safe_mean([decision.reward for decision in decisions]),
+                adaptive_utility=baseline_utility(test, "adaptive"),
+                selector_utility=baseline_utility(test, "selector"),
+                learned_selector_utility=baseline_utility(test, "learned_selector"),
+                oracle_utility=safe_mean([decision.best_reward for decision in decisions]),
+                regret=sum(decision.regret for decision in decisions),
+                selector_actions=sum(decision.action == "selector" for decision in decisions),
+                adaptive_actions=sum(decision.action == "adaptive" for decision in decisions),
+            )
+        )
+    return folds
 
 
 def baseline_utility(examples: list[Example], policy: str) -> float:
@@ -191,6 +280,47 @@ def write_decisions(path: Path, decisions: list[Decision]) -> None:
             )
 
 
+def write_folds(path: Path, folds: list[FoldResult]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "holdout_run_id",
+                "windows",
+                "bandit_utility",
+                "adaptive_utility",
+                "selector_utility",
+                "learned_selector_utility",
+                "bandit_minus_adaptive",
+                "bandit_minus_selector",
+                "bandit_minus_learned_selector",
+                "oracle_utility",
+                "regret",
+                "selector_actions",
+                "adaptive_actions",
+            ]
+        )
+        for fold in folds:
+            writer.writerow(
+                [
+                    fold.holdout_run_id,
+                    fold.windows,
+                    f"{fold.bandit_utility:.12f}",
+                    f"{fold.adaptive_utility:.12f}",
+                    f"{fold.selector_utility:.12f}",
+                    f"{fold.learned_selector_utility:.12f}",
+                    f"{fold.bandit_utility - fold.adaptive_utility:.12f}",
+                    f"{fold.bandit_utility - fold.selector_utility:.12f}",
+                    f"{fold.bandit_utility - fold.learned_selector_utility:.12f}",
+                    f"{fold.oracle_utility:.12f}",
+                    f"{fold.regret:.12f}",
+                    fold.selector_actions,
+                    fold.adaptive_actions,
+                ]
+            )
+
+
 def write_report(
     path: Path,
     *,
@@ -199,6 +329,7 @@ def write_report(
     actions: list[str],
     alpha: float,
     ridge: float,
+    folds: list[FoldResult],
 ) -> None:
     action_counts = {action: sum(decision.action == action for decision in decisions) for action in actions}
     bandit_utility = safe_mean([decision.reward for decision in decisions])
@@ -228,6 +359,16 @@ def write_report(
         f"- Oracle utility across available actions: `{oracle_utility:.6f}`.",
         f"- Cumulative regret: `{regret:.6f}`.",
         "",
+        "## Leave-One-Dataset-Out",
+        "",
+        f"- Fold bandit utility: `{safe_mean([fold.bandit_utility for fold in folds]):.6f}`.",
+        f"- Fold adaptive utility: `{safe_mean([fold.adaptive_utility for fold in folds]):.6f}`.",
+        f"- Fold selector utility: `{safe_mean([fold.selector_utility for fold in folds]):.6f}`.",
+        f"- Fold logistic learned-selector utility: `{safe_mean([fold.learned_selector_utility for fold in folds]):.6f}`.",
+        f"- Fold wins versus adaptive: `{sum(fold.bandit_utility > fold.adaptive_utility for fold in folds)}/{len(folds)}`.",
+        f"- Fold wins versus selector: `{sum(fold.bandit_utility > fold.selector_utility for fold in folds)}/{len(folds)}`.",
+        f"- Fold wins versus logistic learned-selector: `{sum(fold.bandit_utility > fold.learned_selector_utility for fold in folds)}/{len(folds)}`.",
+        "",
         "## Action Mix",
         "",
     ]
@@ -238,7 +379,7 @@ def write_report(
             "",
             "## Interpretation",
             "",
-            "This is a research diagnostic, not a live trading policy. LinUCB is interesting if it beats simple baselines or clearly identifies when exploration hurts. If it does not beat the logistic selector or hand selector, it still gives a useful negative result before adding bandit logic to Rust.",
+            "This is a research diagnostic, not a live trading policy. The chronological replay result is mildly encouraging, but the leave-one-dataset-out result is negative: LinUCB does not beat adaptive, the hand selector, or the logistic learned selector out of sample. The bandit should not be wired into Rust unless a later validation design beats these simpler selectors.",
             "",
         ]
     )
@@ -261,7 +402,9 @@ def main() -> int:
     scale = feature_scale(examples)
     normalized = normalize_examples(examples, scale)
     decisions = run_linucb(normalized, actions, args.alpha, args.ridge)
+    folds = leave_one_dataset_out(normalized, actions, args.alpha, args.ridge)
     write_decisions(project_path(args.output), decisions)
+    write_folds(project_path(args.folds_output), folds)
     write_report(
         project_path(args.report_output),
         examples=normalized,
@@ -269,6 +412,7 @@ def main() -> int:
         actions=actions,
         alpha=args.alpha,
         ridge=args.ridge,
+        folds=folds,
     )
 
     print("Contextual bandit selector")
@@ -277,7 +421,9 @@ def main() -> int:
     print(f"adaptive utility: {baseline_utility(normalized, 'adaptive'):.6f}")
     print(f"selector utility: {baseline_utility(normalized, 'selector'):.6f}")
     print(f"learned selector utility: {baseline_utility(normalized, 'learned_selector'):.6f}")
+    print(f"fold bandit utility: {safe_mean([fold.bandit_utility for fold in folds]):.6f}")
     print(f"wrote {project_path(args.output)}")
+    print(f"wrote {project_path(args.folds_output)}")
     print(f"wrote {project_path(args.report_output)}")
     return 0
 

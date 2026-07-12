@@ -240,8 +240,9 @@ def render_report(
             "## Contextual Bandit Check",
             "",
             "- An offline LinUCB selector was tested as a phase-2 research diagnostic.",
-            "- It beat always-adaptive on the configured windows, but did not beat the logistic learned selector.",
-            "- The bandit remains research-only until it can beat simpler selectors out of sample.",
+            "- Chronological LinUCB utility: `0.000978` versus always-adaptive `0.000544`.",
+            "- Leave-one-dataset-out LinUCB utility: `0.000169` versus logistic learned-selector `0.000573`.",
+            "- This is a negative out-of-sample result, so the bandit remains research-only.",
         ]
     )
     if live_run:
