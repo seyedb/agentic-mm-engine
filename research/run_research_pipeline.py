@@ -42,6 +42,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[list[str]]:
         commands.append([sys.executable, str(RESEARCH_DIR / "policy_evaluation_gate.py")])
     if not args.skip_bandit:
         commands.append([sys.executable, str(RESEARCH_DIR / "train_bandit_selector.py")])
+    commands.append([sys.executable, str(RESEARCH_DIR / "summarize_live_dataset_evaluation.py")])
     commands.append([sys.executable, str(RESEARCH_DIR / "write_project_report.py")])
     return commands
 

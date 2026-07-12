@@ -69,6 +69,19 @@ target/research/policy_gate_policy_summary.csv
 target/research/policy_gate_report.md
 ```
 
+Write a compact live-dataset manifest and policy replay summary from the latest gate outputs:
+
+```bash
+python3 research/summarize_live_dataset_evaluation.py
+```
+
+Outputs:
+
+```text
+target/research/live_dataset_manifest.csv
+target/research/live_dataset_evaluation.md
+```
+
 Sweep selector weights when tuning the rule-based agentic controller:
 
 ```bash
