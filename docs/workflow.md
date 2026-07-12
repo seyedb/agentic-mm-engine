@@ -42,6 +42,18 @@ python3 research/plot_paper_session.py target/reports/kraken_solusd_learned_sele
 
 ## Evaluate Policies
 
+Run the full offline research pipeline:
+
+```bash
+python3 research/run_research_pipeline.py
+```
+
+For quick report regeneration from existing policy-gate outputs:
+
+```bash
+python3 research/run_research_pipeline.py --skip-policy-gates
+```
+
 The main evaluation gate compares static, adaptive, hybrid, selector, and, when a learned model exists, learned-selector policies across collected quote datasets and multiple fill assumptions:
 
 ```bash
