@@ -47,6 +47,12 @@ This is an experimental market-making research project, not a production trading
 - Best rule-selector sweep variant: `selector_thr_0p08_vol_6_spr_5_inv_0p4_dd_10`.
 - Best sweep score: `0.003067`.
 
+## Contextual Bandit Check
+
+- An offline LinUCB selector was tested as a phase-2 research diagnostic.
+- It beat always-adaptive on the configured windows, but did not beat the logistic learned selector.
+- The bandit remains research-only until it can beat simpler selectors out of sample.
+
 ## Live Paper Demo
 
 - Run ID: `solusd_long_20260711_001`.

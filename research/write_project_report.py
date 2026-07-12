@@ -236,6 +236,12 @@ def render_report(
         [
             f"- Best rule-selector sweep variant: `{best_sweep['variant']}`.",
             f"- Best sweep score: `{fmt(best_sweep['score'])}`.",
+            "",
+            "## Contextual Bandit Check",
+            "",
+            "- An offline LinUCB selector was tested as a phase-2 research diagnostic.",
+            "- It beat always-adaptive on the configured windows, but did not beat the logistic learned selector.",
+            "- The bandit remains research-only until it can beat simpler selectors out of sample.",
         ]
     )
     if live_run:
