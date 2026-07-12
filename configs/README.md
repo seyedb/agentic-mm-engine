@@ -35,6 +35,7 @@ Paper-policy configs used by the research loop:
 - `configs/runs/kraken_solusd_hybrid_maker_fee_paper_session.json`
 - `configs/runs/kraken_solusd_selector_maker_fee_paper_session.json`
 - `configs/runs/kraken_solusd_learned_selector_maker_fee_paper_session.json`
+- `configs/runs/kraken_solusd_linear_agent_maker_fee_paper_session.json`
 
 Live paper configs:
 

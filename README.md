@@ -15,6 +15,7 @@ The project now includes an agentic proof of concept: Python trains a small logi
 - Compares static, adaptive, hybrid, selector, and learned-selector policies.
 - Models fills, fees, inventory, cash, mark-to-market PnL, and drawdown.
 - Trains a small Python logistic-regression gate and exports it back to Rust.
+- Trains a multi-action linear policy agent and exports it back to Rust.
 - Evaluates policy robustness across multiple fill assumptions.
 - Includes small checked-in public quote datasets for reproducing the current report.
 
@@ -48,7 +49,8 @@ Latest seven-dataset research report:
 - `learned_selector` configured utility: `0.000572`
 - `selector` configured utility: `0.000521`
 - `adaptive` configured utility: `0.000177`
-- `learned_selector` remains behind `adaptive` under the liquid-fill assumption.
+- `linear_agent` liquid-fill utility: `0.004511`
+- `linear_agent` is functional but mixed: it wins liquid-fill sensitivity and lags configured/conservative assumptions.
 
 This is a small-sample research result, not evidence of a live trading edge.
 

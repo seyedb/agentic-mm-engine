@@ -80,6 +80,13 @@ def learned_selector_row(rows: list[dict[str, str]]) -> dict[str, str] | None:
     return None
 
 
+def linear_agent_row(rows: list[dict[str, str]]) -> dict[str, str] | None:
+    for row in rows:
+        if row["assumption"] == "configured" and row["policy"] == "linear_agent":
+            return row
+    return None
+
+
 def policy_row(
     rows: list[dict[str, str]], assumption: str, policy: str
 ) -> dict[str, str] | None:
@@ -139,6 +146,7 @@ def render_report(
     selector = selector_row(policy_rows)
     adaptive = adaptive_row(policy_rows)
     learned_selector = learned_selector_row(policy_rows)
+    linear_agent = linear_agent_row(policy_rows)
     conservative_best = best_assumption_policy(policy_rows, "conservative_fill")
     liquid_best = best_assumption_policy(policy_rows, "liquid_fill")
     conservative_learned = policy_row(policy_rows, "conservative_fill", "learned_selector")
@@ -151,14 +159,15 @@ def render_report(
         "",
         "## Scope",
         "",
-        "This is an experimental market-making research project, not a production trading system. The goal is to show a clean, reproducible loop from public quote data to Rust paper execution and a small logistic-regression policy controller.",
+        "This is an experimental market-making research project, not a production trading system. The goal is to show a clean, reproducible loop from public quote data to Rust paper execution and small learned policy controllers.",
         "",
         "## System",
         "",
         "- Rust runs replay, paper sessions, live public-data paper mode, fills, fees, inventory, and PnL accounting.",
         "- Python runs data collection, policy evaluation, learned-gate training, Plotly reporting, and summary reports.",
-        "- Policies include static, adaptive, hybrid, selector, and learned-selector variants.",
+        "- Policies include static, adaptive, hybrid, selector, learned-selector, and linear-agent variants.",
         "- The learned selector is a logistic-regression classifier trained in Python, exported as JSON, and loaded back into Rust for paper execution.",
+        "- The linear agent is a multi-action ridge-regression utility model trained in Python and executed by Rust.",
         "",
         "## Research Result",
         "",
@@ -192,6 +201,18 @@ def render_report(
                 f"- Rust learned minus adaptive: `{rust_learned - rust_adaptive:.6f}`.",
                 f"- Rust learned minus selector: `{rust_learned - rust_selector:.6f}`.",
                 f"- Rust learned-selector adaptive-step rate: `{fmt(learned_selector['adaptive_step_pct'])}%`.",
+            ]
+        )
+    if linear_agent and adaptive and selector:
+        rust_linear = parse_float(linear_agent, "mean_utility")
+        rust_adaptive = parse_float(adaptive, "mean_utility")
+        rust_selector = parse_float(selector, "mean_utility")
+        lines.extend(
+            [
+                f"- Rust linear-agent utility: `{rust_linear:.6f}`.",
+                f"- Rust linear-agent minus adaptive: `{rust_linear - rust_adaptive:.6f}`.",
+                f"- Rust linear-agent minus selector: `{rust_linear - rust_selector:.6f}`.",
+                f"- Rust linear-agent adaptive-step rate: `{fmt(linear_agent['adaptive_step_pct'])}%`.",
             ]
         )
     lines.extend(
@@ -270,13 +291,13 @@ def render_report(
             "",
             "The project has reached a credible proof-of-concept state. The agentic loop is real: public data feeds Rust paper sessions, Python trains a small logistic-regression policy gate, the model is exported to JSON, and Rust executes that learned selector in replay and live public-data paper mode.",
             "",
-            "The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, remains close under other assumptions, and produces a coherent live-paper run with bounded inventory. The weakest point remains fill realism.",
+            "The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, while the linear agent is a functional multi-action controller with mixed results: weak under configured and conservative fills, but strongest under the liquid-fill sensitivity. The weakest point remains fill realism.",
             "",
             "## Limitations",
             "",
             "- Public top-of-book snapshots are limited data.",
             "- Fill behavior is modeled, not exchange-verified.",
-            "- The logistic-regression gate is small and trained on a limited number of quote windows.",
+            "- The learned models are small and trained on a limited number of quote windows.",
             "- Live paper mode polls public quotes and never places orders.",
             "",
             "## Wrap-Up Assessment",

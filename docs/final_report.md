@@ -2,14 +2,15 @@
 
 ## Scope
 
-This is an experimental market-making research project, not a production trading system. The goal is to show a clean, reproducible loop from public quote data to Rust paper execution and a small logistic-regression policy controller.
+This is an experimental market-making research project, not a production trading system. The goal is to show a clean, reproducible loop from public quote data to Rust paper execution and small learned policy controllers.
 
 ## System
 
 - Rust runs replay, paper sessions, live public-data paper mode, fills, fees, inventory, and PnL accounting.
 - Python runs data collection, policy evaluation, learned-gate training, Plotly reporting, and summary reports.
-- Policies include static, adaptive, hybrid, selector, and learned-selector variants.
+- Policies include static, adaptive, hybrid, selector, learned-selector, and linear-agent variants.
 - The learned selector is a logistic-regression classifier trained in Python, exported as JSON, and loaded back into Rust for paper execution.
+- The linear agent is a multi-action ridge-regression utility model trained in Python and executed by Rust.
 
 ## Research Result
 
@@ -18,7 +19,7 @@ This is an experimental market-making research project, not a production trading
 - Fill assumptions: `configured`, `conservative_fill`, and `liquid_fill`.
 - Best configured policy: `learned_selector` with utility `0.000572`.
 - Best conservative-fill policy: `selector` with utility `-0.000636`.
-- Best liquid-fill policy: `adaptive` with utility `0.004290`.
+- Best liquid-fill policy: `linear_agent` with utility `0.004511`.
 
 ## Configured Evaluation
 
@@ -30,12 +31,16 @@ This is an experimental market-making research project, not a production trading
 - Rust learned minus adaptive: `0.000395`.
 - Rust learned minus selector: `0.000051`.
 - Rust learned-selector adaptive-step rate: `80.902778%`.
+- Rust linear-agent utility: `-0.000961`.
+- Rust linear-agent minus adaptive: `-0.001138`.
+- Rust linear-agent minus selector: `-0.001482`.
+- Rust linear-agent adaptive-step rate: `58.402778%`.
 
 ## Fill-Assumption Check
 
 - Conservative-fill winner: `selector`.
 - Learned-selector conservative-fill utility: `-0.000865`.
-- Liquid-fill winner: `adaptive`.
+- Liquid-fill winner: `linear_agent`.
 - Learned-selector liquid-fill utility: `0.004082`.
 - No policy wins all assumptions, so the result should be read as a research signal rather than a robust trading claim.
 
@@ -71,13 +76,13 @@ This is an experimental market-making research project, not a production trading
 
 The project has reached a credible proof-of-concept state. The agentic loop is real: public data feeds Rust paper sessions, Python trains a small logistic-regression policy gate, the model is exported to JSON, and Rust executes that learned selector in replay and live public-data paper mode.
 
-The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, remains close under other assumptions, and produces a coherent live-paper run with bounded inventory. The weakest point remains fill realism.
+The result is useful because it is measurable and falsifiable, not because it proves a trading edge. The learned selector leads under the configured evaluation, while the linear agent is a functional multi-action controller with mixed results: weak under configured and conservative fills, but strongest under the liquid-fill sensitivity. The weakest point remains fill realism.
 
 ## Limitations
 
 - Public top-of-book snapshots are limited data.
 - Fill behavior is modeled, not exchange-verified.
-- The logistic-regression gate is small and trained on a limited number of quote windows.
+- The learned models are small and trained on a limited number of quote windows.
 - Live paper mode polls public quotes and never places orders.
 
 ## Wrap-Up Assessment

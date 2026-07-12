@@ -116,6 +116,8 @@ The first ML-agent proof of concept is intentionally small. The Python research 
 
 This keeps model training outside the Rust accounting engine. Rust remains the deterministic simulator and paper-session runner; Python trains the logistic-regression policy gate and writes a JSON model with coefficients, intercept, feature scales, and a probability threshold. The Rust `learned_selector` paper policy can then load that model and execute the gate during replay. The learned selector must beat simple baselines on held-out quote datasets before it should be treated as more than an experimental controller.
 
+The `linear_agent` policy is a larger agentic step. Python fits one ridge linear utility model per action (`static`, `adaptive`, and `selector`), exports a multi-action JSON model, and Rust scores each action at runtime before executing the highest-scored action. It is still a research policy, but it establishes the interface needed for later contextual-bandit or reinforcement-style agents.
+
 An offline LinUCB contextual-bandit diagnostic is available in `research/train_bandit_selector.py`. It is currently a research check only: it beat always-adaptive in chronological replay but failed the leave-one-dataset-out check, so it is not wired into Rust paper/live execution.
 
 ## Fills

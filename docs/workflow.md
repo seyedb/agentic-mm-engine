@@ -96,6 +96,12 @@ Train the first learned policy gate after the policy gate has produced window re
 python3 research/train_policy_selector.py
 ```
 
+Train the multi-action linear policy agent:
+
+```bash
+python3 research/train_linear_policy_agent.py
+```
+
 Run the offline contextual-bandit research diagnostic:
 
 ```bash

@@ -30,6 +30,7 @@ pub enum PolicyAgentKind {
     Hybrid,
     Selector,
     LearnedSelector,
+    LinearAgent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

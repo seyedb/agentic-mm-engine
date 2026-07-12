@@ -21,6 +21,7 @@ DEFAULT_ADAPTIVE_CONFIG = Path("configs/runs/kraken_solusd_adaptive_maker_fee_pa
 DEFAULT_HYBRID_CONFIG = Path("configs/runs/kraken_solusd_hybrid_maker_fee_paper_session.json")
 DEFAULT_SELECTOR_CONFIG = Path("configs/runs/kraken_solusd_selector_maker_fee_paper_session.json")
 DEFAULT_LEARNED_CONFIG = Path("configs/runs/kraken_solusd_learned_selector_maker_fee_paper_session.json")
+DEFAULT_LINEAR_CONFIG = Path("configs/runs/kraken_solusd_linear_agent_maker_fee_paper_session.json")
 DEFAULT_WORK_DIR = Path("target/research/policy_gate")
 DEFAULT_DATASET_OUTPUT = Path("target/research/policy_gate_dataset_summary.csv")
 DEFAULT_WINDOW_OUTPUT = Path("target/research/policy_gate_window_results.csv")
@@ -155,6 +156,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hybrid-config", type=Path, default=DEFAULT_HYBRID_CONFIG)
     parser.add_argument("--selector-config", type=Path, default=DEFAULT_SELECTOR_CONFIG)
     parser.add_argument("--learned-config", type=Path, default=DEFAULT_LEARNED_CONFIG)
+    parser.add_argument("--linear-config", type=Path, default=DEFAULT_LINEAR_CONFIG)
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIR)
     parser.add_argument("--dataset-output", type=Path, default=DEFAULT_DATASET_OUTPUT)
     parser.add_argument("--window-output", type=Path, default=DEFAULT_WINDOW_OUTPUT)
@@ -285,27 +287,28 @@ def load_policy_configs(args: argparse.Namespace) -> list[tuple[str, dict[str, A
         project_path(args.hybrid_config),
         project_path(args.selector_config),
         project_path(args.learned_config),
+        project_path(args.linear_config),
     ]
     configs = []
     for path in paths:
         config = load_json(path)
         if config.get("type") != "paper_session":
             raise ValueError(f"{path}: config type must be paper_session")
-        if should_skip_missing_learned_model(path, config):
+        if should_skip_missing_policy_model(path, config):
             continue
         configs.append((path.stem, config))
     return configs
 
 
-def should_skip_missing_learned_model(path: Path, config: dict[str, Any]) -> bool:
+def should_skip_missing_policy_model(path: Path, config: dict[str, Any]) -> bool:
     policy = config.get("policy", {})
-    if not isinstance(policy, dict) or policy.get("type") != "learned_selector":
+    if not isinstance(policy, dict) or policy.get("type") not in {"learned_selector", "linear_agent"}:
         return False
     model_path = project_path(Path(str(policy.get("model_path", ""))))
     if model_path.exists():
         return False
     print(
-        f"Skipping {path.name}: learned selector model not found at {model_path}",
+        f"Skipping {path.name}: {policy.get('type')} model not found at {model_path}",
         file=sys.stderr,
     )
     return True

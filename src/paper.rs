@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs;
 
@@ -84,6 +85,12 @@ pub enum PaperPolicyConfig {
     },
     #[serde(rename = "learned_selector")]
     LearnedSelector {
+        model_path: String,
+        adaptive_policy: PaperAdaptivePolicyConfig,
+        selector_policy: PaperSelectorPolicyConfig,
+    },
+    #[serde(rename = "linear_agent")]
+    LinearAgent {
         model_path: String,
         adaptive_policy: PaperAdaptivePolicyConfig,
         selector_policy: PaperSelectorPolicyConfig,
@@ -204,6 +211,7 @@ pub struct PaperSessionRunner {
     previous_mid_price: Option<f64>,
     volatility: RollingVolatility,
     learned_model: Option<LearnedPolicyModel>,
+    linear_model: Option<LinearPolicyModel>,
     learned_features: RollingLearnedFeatures,
     peak_pnl: f64,
     rng: StdRng,
@@ -212,14 +220,17 @@ pub struct PaperSessionRunner {
 impl PaperSessionRunner {
     pub fn new(config: PaperSessionConfig) -> Self {
         let learned_model = load_learned_policy_model(&config.policy);
+        let linear_model = load_linear_policy_model(&config.policy);
         let learned_window = learned_model
             .as_ref()
             .and_then(|model| model.feature_window)
+            .or_else(|| linear_model.as_ref().and_then(|model| model.feature_window))
             .unwrap_or(30);
         Self {
             volatility: RollingVolatility::new(config.volatility_window),
             learned_features: RollingLearnedFeatures::new(learned_window),
             learned_model,
+            linear_model,
             rng: StdRng::seed_from_u64(config.seed),
             config,
             state: None,
@@ -285,6 +296,7 @@ impl PaperSessionRunner {
             },
             &self.config.policy,
             self.learned_model.as_ref(),
+            self.linear_model.as_ref(),
             learned_features,
         );
         let quote = fee_aware_quote(
@@ -338,6 +350,7 @@ fn apply_paper_policy(
     input: PaperPolicyInput<'_>,
     policy: &PaperPolicyConfig,
     learned_model: Option<&LearnedPolicyModel>,
+    linear_model: Option<&LinearPolicyModel>,
     learned_features: Option<LearnedFeatureSnapshot>,
 ) -> PaperPolicyDecision {
     match policy.clone() {
@@ -480,6 +493,17 @@ fn apply_paper_policy(
             learned_model.expect("learned selector model should be loaded before paper session"),
             learned_features.expect("learned selector features should be available"),
         ),
+        PaperPolicyConfig::LinearAgent {
+            model_path: _,
+            adaptive_policy,
+            selector_policy,
+        } => linear_agent_policy_decision(
+            input,
+            adaptive_policy,
+            selector_policy,
+            linear_model.expect("linear agent model should be loaded before paper session"),
+            learned_features.expect("linear agent features should be available"),
+        ),
     }
 }
 
@@ -597,6 +621,30 @@ impl PolicyAgent for LearnedSelectorAgent<'_> {
     }
 }
 
+struct LinearPolicyAgent<'a> {
+    model: &'a LinearPolicyModel,
+}
+
+impl PolicyAgent for LinearPolicyAgent<'_> {
+    fn decide(&self, observation: AgentObservation) -> PolicyAgentDecision {
+        let features = LearnedFeatureSnapshot {
+            estimated_volatility: observation.estimated_volatility,
+            observed_spread: observation.observed_spread,
+            max_observed_spread: observation.max_observed_spread,
+            abs_mid_move: observation.abs_mid_move,
+            abs_inventory: observation.abs_inventory,
+            drawdown: observation.drawdown,
+        };
+        let (action, score) = self.model.best_action(features);
+        PolicyAgentDecision {
+            agent: PolicyAgentKind::LinearAgent,
+            action: policy_action_from_model_action(action),
+            reason: PolicyReason::ModelScore,
+            score: Some(score),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct LearnedPolicyModel {
     action_on: String,
@@ -610,6 +658,31 @@ struct LearnedPolicyModel {
     feature_scale: LearnedFeatureScale,
     #[serde(default)]
     feature_window: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LinearPolicyModel {
+    actions: Vec<String>,
+    weights: BTreeMap<String, LearnedFeatureWeights>,
+    intercepts: BTreeMap<String, f64>,
+    feature_scale: LearnedFeatureScale,
+    #[serde(default)]
+    feature_window: Option<usize>,
+}
+
+impl LinearPolicyModel {
+    fn best_action(&self, features: LearnedFeatureSnapshot) -> (&str, f64) {
+        self.actions
+            .iter()
+            .map(|action| (action.as_str(), linear_policy_score(self, action, features)))
+            .max_by(|left, right| {
+                left.1
+                    .partial_cmp(&right.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| left.0.cmp(right.0))
+            })
+            .expect("linear policy model should have at least one action")
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -741,6 +814,58 @@ fn learned_selector_policy_decision(
     }
 }
 
+fn linear_agent_policy_decision(
+    input: PaperPolicyInput<'_>,
+    adaptive_config: PaperAdaptivePolicyConfig,
+    selector_config: PaperSelectorPolicyConfig,
+    model: &LinearPolicyModel,
+    features: LearnedFeatureSnapshot,
+) -> PaperPolicyDecision {
+    let agent = LinearPolicyAgent { model };
+    let agent_decision = agent.decide(AgentObservation {
+        estimated_volatility: features.estimated_volatility,
+        observed_spread: features.observed_spread,
+        max_observed_spread: features.max_observed_spread,
+        abs_mid_move: features.abs_mid_move,
+        abs_inventory: features.abs_inventory,
+        drawdown: features.drawdown,
+    });
+
+    match agent_decision.action {
+        PolicyAction::Static => PaperPolicyDecision {
+            quote: input.quote,
+            mode: PaperPolicyMode::Static,
+            trigger: PaperPolicyTrigger::None,
+            agent: agent_decision,
+        },
+        PolicyAction::Adaptive => PaperPolicyDecision {
+            quote: adaptive_quote(
+                input.quote,
+                input.state,
+                input.observed_quote,
+                input.estimated_volatility,
+                adaptive_config.into(),
+            ),
+            mode: PaperPolicyMode::Adaptive,
+            trigger: PaperPolicyTrigger::Configured,
+            agent: agent_decision,
+        },
+        PolicyAction::Selector => {
+            let mut selector_decision = selector_policy_decision(
+                input.quote,
+                input.state,
+                input.observed_quote,
+                input.estimated_volatility,
+                input.observation,
+                adaptive_config.into(),
+                selector_config.into(),
+            );
+            selector_decision.agent = agent_decision;
+            selector_decision
+        }
+    }
+}
+
 fn policy_action_from_model_action(action: &str) -> PolicyAction {
     match action {
         "static" => PolicyAction::Static,
@@ -772,6 +897,35 @@ fn learned_policy_score(model: &LearnedPolicyModel, features: LearnedFeatureSnap
             * model.weights.drawdown
 }
 
+fn linear_policy_score(
+    model: &LinearPolicyModel,
+    action: &str,
+    features: LearnedFeatureSnapshot,
+) -> f64 {
+    let weights = model
+        .weights
+        .get(action)
+        .unwrap_or_else(|| panic!("linear agent model missing weights for action {action:?}"));
+    model.intercepts.get(action).copied().unwrap_or(0.0)
+        + normalized_feature(
+            features.estimated_volatility,
+            model.feature_scale.estimated_volatility,
+        ) * weights.estimated_volatility
+        + normalized_feature(
+            features.observed_spread,
+            model.feature_scale.observed_spread,
+        ) * weights.observed_spread
+        + normalized_feature(
+            features.max_observed_spread,
+            model.feature_scale.max_observed_spread,
+        ) * weights.max_observed_spread
+        + normalized_feature(features.abs_mid_move, model.feature_scale.abs_mid_move)
+            * weights.abs_mid_move
+        + normalized_feature(features.abs_inventory, model.feature_scale.abs_inventory)
+            * weights.abs_inventory
+        + normalized_feature(features.drawdown, model.feature_scale.drawdown) * weights.drawdown
+}
+
 fn normalized_feature(value: f64, scale: f64) -> f64 {
     if scale <= 0.0 { 0.0 } else { value / scale }
 }
@@ -787,6 +941,18 @@ fn load_learned_policy_model(policy: &PaperPolicyConfig) -> Option<LearnedPolicy
         panic!("failed to parse learned selector model {model_path}: {error}")
     });
     validate_learned_policy_model(model_path, &model);
+    Some(model)
+}
+
+fn load_linear_policy_model(policy: &PaperPolicyConfig) -> Option<LinearPolicyModel> {
+    let PaperPolicyConfig::LinearAgent { model_path, .. } = policy else {
+        return None;
+    };
+    let payload = fs::read_to_string(model_path)
+        .unwrap_or_else(|error| panic!("failed to read linear agent model {model_path}: {error}"));
+    let model: LinearPolicyModel = serde_json::from_str(&payload)
+        .unwrap_or_else(|error| panic!("failed to parse linear agent model {model_path}: {error}"));
+    validate_linear_policy_model(model_path, &model);
     Some(model)
 }
 
@@ -807,6 +973,26 @@ fn validate_learned_policy_model(path: &str, model: &LearnedPolicyModel) {
         && (!probability_threshold.is_finite() || !(0.0..=1.0).contains(&probability_threshold))
     {
         panic!("learned selector model {path} has invalid probability threshold");
+    }
+}
+
+fn validate_linear_policy_model(path: &str, model: &LinearPolicyModel) {
+    if model.actions.is_empty() {
+        panic!("linear agent model {path} has no actions");
+    }
+    for action in &model.actions {
+        match action.as_str() {
+            "static" | "adaptive" | "selector" => {}
+            other => panic!("linear agent model {path} has unsupported action {other:?}"),
+        }
+        if !model.weights.contains_key(action) {
+            panic!("linear agent model {path} missing weights for action {action:?}");
+        }
+        if let Some(intercept) = model.intercepts.get(action)
+            && !intercept.is_finite()
+        {
+            panic!("linear agent model {path} has non-finite intercept for action {action:?}");
+        }
     }
 }
 
@@ -1300,6 +1486,7 @@ fn policy_agent_name(agent: PolicyAgentKind) -> &'static str {
         PolicyAgentKind::Hybrid => "hybrid",
         PolicyAgentKind::Selector => "selector",
         PolicyAgentKind::LearnedSelector => "learned_selector",
+        PolicyAgentKind::LinearAgent => "linear_agent",
     }
 }
 
@@ -1504,6 +1691,7 @@ mod tests {
             },
             None,
             None,
+            None,
         );
 
         assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
@@ -1533,6 +1721,7 @@ mod tests {
                 inventory_skew_multiplier: 0.10,
                 touch_spread_multiplier: 0.0,
             },
+            None,
             None,
             None,
         );
@@ -1571,6 +1760,7 @@ mod tests {
             },
             None,
             None,
+            None,
         );
 
         assert_eq!(decision.quote, input);
@@ -1605,6 +1795,7 @@ mod tests {
                 inventory_threshold: 10.0,
                 volatility_threshold: 0.01,
             },
+            None,
             None,
             None,
         );
@@ -1646,6 +1837,7 @@ mod tests {
             },
             None,
             None,
+            None,
         );
 
         assert_eq!(decision.quote, input);
@@ -1682,6 +1874,7 @@ mod tests {
                 drawdown_weight: 0.0,
                 activation_threshold: 0.10,
             },
+            None,
             None,
             None,
         );
@@ -1770,6 +1963,116 @@ mod tests {
         assert_eq!(decision.agent.agent, PolicyAgentKind::LearnedSelector);
         assert_eq!(decision.agent.action, PolicyAction::Selector);
         assert!(decision.agent.score.unwrap_or_default() >= 0.0);
+    }
+
+    #[test]
+    fn linear_agent_uses_highest_scored_action() {
+        let state = SystemState::new(100.0);
+        let model = LinearPolicyModel {
+            actions: vec![
+                "static".to_string(),
+                "adaptive".to_string(),
+                "selector".to_string(),
+            ],
+            intercepts: BTreeMap::from([
+                ("static".to_string(), 0.0),
+                ("adaptive".to_string(), 0.1),
+                ("selector".to_string(), 0.2),
+            ]),
+            weights: BTreeMap::from([
+                (
+                    "static".to_string(),
+                    LearnedFeatureWeights {
+                        estimated_volatility: 0.0,
+                        observed_spread: 0.0,
+                        max_observed_spread: 0.0,
+                        abs_mid_move: 0.0,
+                        abs_inventory: 0.0,
+                        drawdown: 0.0,
+                    },
+                ),
+                (
+                    "adaptive".to_string(),
+                    LearnedFeatureWeights {
+                        estimated_volatility: 0.0,
+                        observed_spread: 0.0,
+                        max_observed_spread: 0.0,
+                        abs_mid_move: 0.0,
+                        abs_inventory: 0.0,
+                        drawdown: 0.0,
+                    },
+                ),
+                (
+                    "selector".to_string(),
+                    LearnedFeatureWeights {
+                        estimated_volatility: 0.0,
+                        observed_spread: 0.0,
+                        max_observed_spread: 0.0,
+                        abs_mid_move: 0.0,
+                        abs_inventory: 1.0,
+                        drawdown: 0.0,
+                    },
+                ),
+            ]),
+            feature_scale: LearnedFeatureScale {
+                estimated_volatility: 1.0,
+                observed_spread: 1.0,
+                max_observed_spread: 1.0,
+                abs_mid_move: 1.0,
+                abs_inventory: 1.0,
+                drawdown: 1.0,
+            },
+            feature_window: Some(30),
+        };
+        let decision = linear_agent_policy_decision(
+            paper_policy_input(
+                Quote {
+                    bid: 99.99,
+                    ask: 100.01,
+                },
+                &state,
+                Some(Quote {
+                    bid: 99.90,
+                    ask: 100.10,
+                }),
+                0.01,
+                0.0,
+            ),
+            PaperAdaptivePolicyConfig {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+            },
+            PaperSelectorPolicyConfig {
+                min_spread: 0.02,
+                max_spread: 0.20,
+                volatility_spread_multiplier: 1.0,
+                inventory_skew_multiplier: 0.0,
+                touch_spread_multiplier: 0.5,
+                volatility_weight: 20.0,
+                spread_weight: 1.0,
+                inventory_weight: 0.0,
+                drawdown_weight: 0.0,
+                activation_threshold: 0.10,
+            },
+            &model,
+            LearnedFeatureSnapshot {
+                estimated_volatility: 0.0,
+                observed_spread: 0.0,
+                max_observed_spread: 0.0,
+                abs_mid_move: 0.0,
+                abs_inventory: 1.0,
+                drawdown: 0.0,
+            },
+        );
+
+        assert_eq!(decision.agent.agent, PolicyAgentKind::LinearAgent);
+        assert_eq!(decision.agent.action, PolicyAction::Selector);
+        assert_eq!(decision.mode, PaperPolicyMode::Adaptive);
+        assert_eq!(decision.trigger, PaperPolicyTrigger::Volatility);
+        assert!(decision.agent.score.unwrap_or_default() > 1.0);
     }
 
     #[test]
