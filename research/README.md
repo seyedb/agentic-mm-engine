@@ -1,6 +1,6 @@
 # Research Harness
 
-Python is used for data collection, model training, evaluation gates, and reports. Rust remains the execution engine for replay, paper sessions, fills, fees, inventory, and PnL accounting.
+Python is used for data collection, model training, evaluation gates, and reports. Rust remains the execution engine for replay, paper sessions, fills, fees, inventory, and PnL accounting. The active scripts use the Python standard library.
 
 Current entrypoints:
 

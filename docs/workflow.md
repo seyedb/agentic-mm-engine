@@ -55,7 +55,7 @@ For quick report regeneration from existing policy-gate outputs:
 python3 research/run_research_pipeline.py --skip-policy-gates
 ```
 
-The main evaluation gate compares static, adaptive, hybrid, selector, and, when a learned model exists, learned-selector policies across collected quote datasets and multiple fill assumptions:
+The main evaluation gate compares static, adaptive, hybrid, selector, learned-selector, linear-agent, and bandit-agent policies across collected quote datasets and multiple fill assumptions:
 
 ```bash
 python3 research/policy_evaluation_gate.py

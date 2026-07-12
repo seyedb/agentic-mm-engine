@@ -9,10 +9,15 @@ This is a learning and research project, not a production trading system. The cu
 
 The project now includes agentic proof-of-concept policies: Python trains small policy models from paper-session results, exports JSON models, and Rust executes those learned decisions during replay.
 
+### Requirements
+
+- Rust toolchain with Cargo.
+- Python 3. The active research harness uses the Python standard library.
+
 ### What It Does
 
 - Replays public top-of-book quote data through Rust paper-session policies.
-- Compares static, adaptive, hybrid, selector, and learned-selector policies.
+- Compares static, adaptive, hybrid, selector, learned-selector, linear-agent, and bandit-agent policies.
 - Models fills, fees, inventory, cash, mark-to-market PnL, and drawdown.
 - Trains a small Python logistic-regression gate and exports it back to Rust.
 - Trains a multi-action linear policy agent and exports it back to Rust.
@@ -70,8 +75,10 @@ python3 research/collect_quote_dataset.py --pair SOLUSD --samples 120 --interval
 ### Verify
 
 ```bash
-cargo test
-cargo clippy -- -D warnings
+cargo test --quiet
+cargo clippy --quiet -- -D warnings
+python3 -m py_compile research/*.py research/archive/*.py
+python3 research/run_research_pipeline.py --dry-run
 ```
 
 ### Docs

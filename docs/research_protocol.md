@@ -1,12 +1,12 @@
 # Research Protocol
 
-This project is an experimental market-making research engine, not a production trading system. The current goal is to test whether a small learned policy gate can improve paper-session quoting decisions on public top-of-book data.
+This project is an experimental market-making research engine, not a production trading system. The current goal is to test a reproducible loop from public top-of-book data to Rust paper execution and small learned policy controllers.
 
 ## Research Question
 
-Can a Python-trained logistic-regression policy gate choose between `adaptive` and `selector` quoting in a way that improves risk-adjusted paper-session utility when Rust executes the learned policy?
+Can Python-trained policy controllers choose quoting behavior in a way that improves risk-adjusted paper-session utility when Rust executes the exported models?
 
-The learned policy is considered interesting only if it improves over simple baselines after being exported to JSON and loaded back into the Rust paper engine.
+The learned policies are considered interesting only if they improve over simple baselines after being exported to JSON and loaded back into the Rust paper engine.
 
 ## Current Policies
 
@@ -15,6 +15,8 @@ The learned policy is considered interesting only if it improves over simple bas
 - `hybrid`: switches from static to adaptive on risk triggers.
 - `selector`: weighted rule-based selector between static and adaptive behavior.
 - `learned_selector`: Rust-executed logistic-regression gate trained by Python.
+- `linear_agent`: Rust-executed multi-action ridge-regression utility model trained by Python.
+- `bandit_agent`: Rust-executed LinUCB contextual-bandit policy trained by Python.
 
 ## Evaluation Loop
 
@@ -24,10 +26,12 @@ Run the gate once to produce window-level policy outcomes:
 python3 research/policy_evaluation_gate.py
 ```
 
-Train the logistic-regression gate from those outcomes:
+Train the learned controllers from those outcomes:
 
 ```bash
 python3 research/train_policy_selector.py
+python3 research/train_linear_policy_agent.py
+python3 research/train_contextual_bandit_agent.py
 ```
 
 Rerun the gate so Rust loads and evaluates the learned model:
@@ -37,10 +41,12 @@ python3 research/policy_evaluation_gate.py
 python3 research/write_project_report.py
 ```
 
-The learned model artifact is written to:
+The learned model artifacts are written to:
 
 ```text
 target/research/learned_policy_selector_model.json
+target/research/linear_policy_agent_model.json
+target/research/contextual_bandit_agent_model.json
 ```
 
 ## Metrics
@@ -72,11 +78,12 @@ A useful learned-policy result should satisfy most of these:
 - The result does not collapse under conservative fill assumptions.
 - Python leave-one-dataset-out validation does not contradict the Rust gate result.
 - Trigger attribution shows the learned policy is not simply always-adaptive or never-adaptive.
+- Linear and bandit agents are treated as proof-of-concept controllers unless they beat simpler policies in the gate.
 
 These criteria are research checks, not proof of a trading edge.
 
 ## Current Interpretation
 
-The latest result is promising because the Rust-executed learned selector leads under configured assumptions after adding fresh quote datasets. It is still a small-sample result, and liquid-fill assumptions continue to favor adaptive quoting.
+The latest result is promising because the Rust-executed learned selector leads under configured assumptions after adding fresh quote datasets. The linear agent wins the liquid-fill sensitivity, and the contextual bandit is executable but not the best current policy. It is still a small-sample result, and fill realism remains the weakest point.
 
 The project has also completed a live public-data paper demonstration with the learned selector. That demo is an operational check of the full loop, not evidence of a trading edge. See [final_report.md](final_report.md) for the current wrap-up result.

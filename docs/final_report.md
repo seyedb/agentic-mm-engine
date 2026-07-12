@@ -8,7 +8,7 @@ This is an experimental market-making research project, not a production trading
 
 - Rust runs replay, paper sessions, live public-data paper mode, fills, fees, inventory, and PnL accounting.
 - Python runs data collection, policy evaluation, learned-gate training, Plotly reporting, and summary reports.
-- Policies include static, adaptive, hybrid, selector, learned-selector, and linear-agent variants.
+- Policies include static, adaptive, hybrid, selector, learned-selector, linear-agent, and bandit-agent variants.
 - The learned selector is a logistic-regression classifier trained in Python, exported as JSON, and loaded back into Rust for paper execution.
 - The linear agent is a multi-action ridge-regression utility model trained in Python and executed by Rust.
 - The bandit agent is a LinUCB contextual-bandit policy trained in Python and executed by Rust.
